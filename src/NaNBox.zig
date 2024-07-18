@@ -27,32 +27,32 @@ pub const NaNBox = union {
         return self.v != self.v;
     }
 
-    fn setType(x: f64, ty: Type) f64 {
+    inline fn setType(x: f64, ty: Type) f64 {
         var bits: u64 = @bitCast(x);
         const tv: u64 = @intFromEnum(ty);
         bits = (bits & ~TYPE_MASK) | ((tv & 0xF) << 48);
         return @bitCast(bits);
     }
 
-    pub fn getType(self: *const Self) Type {
+    pub inline fn getType(self: *const Self) Type {
         if (!self.isNaN()) return .F64;
         const bits: u64 = @bitCast(self.v);
         return @enumFromInt((bits & TYPE_MASK) >> 48);
     }
 
-    fn setValue(x: f64, value: i64) f64 {
+    inline fn setValue(x: f64, value: i64) f64 {
         var bits: u64 = @bitCast(x);
         bits = (bits & ~VALUE_MASK) | (@abs(value) & VALUE_MASK) | if (value < 0) @as(u64, 1 << 63) else 0;
         return @bitCast(bits);
     }
 
-    fn getValue(self: *const Self) i64 {
+    inline fn getValue(self: *const Self) i64 {
         const bits: u64 = @bitCast(self.v);
         const value: i64 = @intCast(bits & VALUE_MASK);
         return if ((bits & (1 << 63)) != 0) -value else value;
     }
 
-    pub fn is(self: *const Self, comptime T: type) bool {
+    pub inline fn is(self: *const Self, comptime T: type) bool {
         return switch (T) {
             f64 => !self.isNaN(),
             i64 => self.isNaN() and self.getType() == .I64,
@@ -63,7 +63,7 @@ pub const NaNBox = union {
         };
     }
 
-    pub fn as(self: *const Self, comptime T: type) T {
+    pub inline fn as(self: *const Self, comptime T: type) T {
         return switch (T) {
             f64 => self.v,
             i64 => self.getValue(),
@@ -75,7 +75,7 @@ pub const NaNBox = union {
         };
     }
 
-    pub fn from(comptime T: type, v: T) Self {
+    pub inline fn from(comptime T: type, v: T) Self {
         return switch (T) {
             f64 => .{ .v = v },
             u64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U64) },
