@@ -1,30 +1,11 @@
-// Copyright 2024 Mark Tyrkba <marktyrkba456@gmail.com>
-
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 const std = @import("std");
 
 pub const Type = enum(u8) {
     I64,
     U64,
-    F64
+    F64,
+    Str,
+    U8
 };
 
 pub const NaNBox = union {
@@ -36,7 +17,7 @@ pub const NaNBox = union {
     const TYPE_MASK: u64 = ((1 << 4) - 1) << 48;
     const VALUE_MASK: u64 = (1 << 48) - 1;
 
-    const SUPPORTED_TYPES_MSG = "Supported types: " ++ @typeName(i64) ++ ", " ++ @typeName(u64) ++ ", " ++ @typeName(f64);
+    const SUPPORTED_TYPES_MSG = "Supported types: " ++ @typeName(i64) ++ ", " ++ @typeName(u64) ++ ", " ++ @typeName(f64) ++ ", " ++ @typeName(u8) ++ ", []u8";
 
     inline fn mkInf() f64 {
         return @bitCast(EXP_MASK);
@@ -54,7 +35,7 @@ pub const NaNBox = union {
     }
 
     pub fn getType(self: *const Self) Type {
-         if (!self.isNaN()) return .F64;
+        if (!self.isNaN()) return .F64;
         const bits: u64 = @bitCast(self.v);
         return @enumFromInt((bits & TYPE_MASK) >> 48);
     }
@@ -76,6 +57,8 @@ pub const NaNBox = union {
             f64 => !self.isNaN(),
             i64 => self.isNaN() and self.getType() == .I64,
             u64 => self.isNaN() and self.getType() == .U64,
+            u8  => self.isNaN() and self.getType() == .U8,
+            []u8, []const u8 => self.isNaN() and self.getType() == .Str,
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG)
         };
     }
@@ -85,6 +68,9 @@ pub const NaNBox = union {
             f64 => self.v,
             i64 => self.getValue(),
             u64 => @intCast(self.getValue()),
+            u8  => @intCast(self.getValue()),
+            []u8, []const u8 => @intCast(self.getValue()),
+            usize => @intCast(self.getValue()),
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
     }
@@ -92,8 +78,10 @@ pub const NaNBox = union {
     pub fn from(comptime T: type, v: T) Self {
         return switch (T) {
             f64 => .{ .v = v },
-            u64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @as(i64, @intCast(v))), .U64) },
+            u64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U64) },
             i64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), v), .I64) },
+            u8  => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U8) },
+            []u8, []const u8 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v.len)), .Str) },
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
     }
@@ -103,6 +91,8 @@ pub const NaNBox = union {
             .F64 => writer.print("{d}", .{ self.v }),
             .I64 => writer.print("{d}", .{ self.as(i64) }),
             .U64 => writer.print("{d}", .{ self.as(u64) }),
+            .U8  => writer.print("{d}", .{ self.as(u8) }),
+            .Str => writer.print("Str size: {d}", .{ self.as(usize) }),
         };
     }
 };

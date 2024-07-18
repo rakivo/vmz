@@ -1,7 +1,8 @@
-const std      = @import("std");
-const vm_mod   = @import("vm.zig");
-const inst_mod = @import("inst.zig");
-const NaNBox   = @import("NaNBox.zig").NaNBox;
+const std       = @import("std");
+
+const vm_mod    = @import("vm.zig");
+const inst_mod  = @import("inst.zig");
+const NaNBox    = @import("NaNBox.zig").NaNBox;
 
 const Vm        = vm_mod.Vm;
 const Program   = vm_mod.program;
@@ -9,7 +10,7 @@ const Program   = vm_mod.program;
 const Inst      = inst_mod.Inst;
 const InstValue = inst_mod.InstValue;
 
-const insts = [_]Inst{
+const pi = [_]Inst{
     Inst.new(.push, InstValue.new(NaNBox, NaNBox.from(f64, 4.0))),
     Inst.new(.push, InstValue.new(NaNBox, NaNBox.from(f64, 3.0))),
     Inst.new(.push, InstValue.new(NaNBox, NaNBox.from(u64, 750000))),
@@ -38,11 +39,16 @@ const insts = [_]Inst{
     Inst.new(.dmp,  inst_mod.None),
 };
 
+const str = [_]Inst{
+    Inst.new(.push, InstValue.new([]const u8, "hello world")),
+    Inst.new(.dmp,  inst_mod.None),
+};
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var program = try Program.new(arena.allocator(), &insts);
+    var program = try Program.new(arena.allocator(), &pi);
     defer program.deinit();
 
     const start = std.time.microTimestamp();

@@ -1,14 +1,18 @@
-const std      = @import("std");
+const std       = @import("std");
 
-const Inst     = @import("inst.zig").Inst;
-const Trap     = @import("trap.zig").Trap;
-const NaNBox   = @import("NaNBox.zig").NaNBox;
-const VecDeque = @import("VecDeque.zig").VecDeque;
+const Inst      = @import("inst.zig").Inst;
+const Trap      = @import("trap.zig").Trap;
+const NaNBox    = @import("NaNBox.zig").NaNBox;
+const VecDeque  = @import("VecDeque.zig").VecDeque;
 
+const writer    = std.io.getStdOut().writer();
 const print     = std.debug.print;
 const assert    = std.debug.assert;
+
 const Program   = std.ArrayList(Inst);
 const Allocator = std.mem.Allocator;
+
+const DEBUG = false;
 
 pub const program = struct {
     pub fn new(alloc: Allocator, insts: []const Inst) !Program {
@@ -25,12 +29,15 @@ pub const Vm = struct {
     ip: usize = 0,
 
     const Self = @This();
-    const STACK_CAP = 1024;
+
+    pub const STR_CAP = 128;
+    pub const STACK_CAP = 1024;
+
     const ALLOCATOR = std.heap.page_allocator;
 
     pub inline fn new(_program: Program) !Self {
         return .{
-            .stack = try VecDeque(NaNBox).init(ALLOCATOR),
+            .stack = try VecDeque(NaNBox).initCapacity(ALLOCATOR, STACK_CAP),
             .program = _program,
         };
     }
@@ -48,7 +55,24 @@ pub const Vm = struct {
                     .F64 => |val| self.stack.pushBack(NaNBox.from(f64, val)),
                     .U64 => |val| self.stack.pushBack(NaNBox.from(u64, val)),
                     .I64 => |val| self.stack.pushBack(NaNBox.from(i64, val)),
-                    else => {}
+                    .Str => |str| {
+                        if (str.len - 1 >= STR_CAP) {
+                            const cap: usize = if (str.len - 1 >= STACK_CAP) STACK_CAP else STR_CAP;
+                            print("String length: {} is greater than the maximum capacity: {}\n", .{str.len, cap});
+                            unreachable;
+                        }
+
+                        var nans: [STR_CAP]NaNBox = undefined;
+                        var size: usize = 0;
+                        for (str, 0..) |byte, i| {
+                            size = i + 1;
+                            nans[i] = NaNBox.from(u8, byte);
+                        }
+
+                        try self.stack.appendSlice(nans[0..size]);
+                        try self.stack.pushBack(NaNBox.from([]const u8, str));
+                    },
+                    else => return error.INVALID_TYPE,
                 };
                 self.ip += 1;
             } else return error.STACK_OVERFLOW,
@@ -73,7 +97,7 @@ pub const Vm = struct {
                     back.* = t;
                     self.ip += 1;
                 } else return error.STACK_UNDERFLOW,
-                else => {}
+                else => return error.INVALID_TYPE
             },
             .dup => switch (inst.v) {
                 .U64 => |idx_| if (self.stack.len() > idx_) {
@@ -82,7 +106,7 @@ pub const Vm = struct {
                     try self.stack.pushBack(nth);
                     self.ip += 1;
                 } else return error.STACK_UNDERFLOW,
-                else => {}
+                else => return error.INVALID_TYPE
             },
             .dec => if (self.stack.len() > 0) {
                 const nan = self.stack.back().?;
@@ -90,6 +114,7 @@ pub const Vm = struct {
                     .U64 => NaNBox.from(u64, nan.as(u64) - 1),
                     .I64 => NaNBox.from(i64, nan.as(i64) - 1),
                     .F64 => NaNBox.from(f64, nan.as(f64) - 1.0),
+                    else => return error.INVALID_TYPE
                 };
                 self.ip += 1;
             },
@@ -97,10 +122,36 @@ pub const Vm = struct {
                 .U64 => |ip| if (self.program.items.len > ip and self.flags) {
                     self.ip = ip;
                 } else { self.ip += 1; },
-                else => {}
+                else => return error.INVALID_TYPE
             },
-            .dmp => if (self.stack.popBack()) |last| {
-                print("{d}\n", .{last});
+            .dmp => if (self.stack.back()) |v| {
+                switch (v.getType()) {
+                    .I64, .U64, .F64, .U8 => print("{d}\n", .{v}),
+                    .Str => if (self.stack.len() > v.as(usize)) {
+                        const len = v.as(usize);
+                        const nans = self.stack.buf[self.stack.len() - 1 - len .. self.stack.len() - 1];
+
+                        // I mean we can go the heap way but it feels redundant
+                        //
+                        // const start = self.stack.len() - 1 - len;
+                        // const end = self.stack.len() - 1;
+
+                        // var buf = try std.ArrayList(u8).initCapacity(ALLOCATOR, end - start);
+                        // for (nans) |nan|
+                        //     try buf.append(nan.as(u8));
+
+                        // print("{s}\n", .{buf.items});
+
+                        var bytes: [STR_CAP + 1]u8 = undefined;
+                        for (nans, 0..) |nan, i| bytes[i] = nan.as(u8);
+                        bytes[len] = '\n';
+
+                        _ = writer.write(bytes[0..len + 1]) catch |err| {
+                            std.log.err("Failed to write to stdout: {}", .{err});
+                            unreachable;
+                        };
+                    },
+                }
                 self.ip += 1;
             },
             .fadd => if (self.stack.len() > 1) {
@@ -127,6 +178,7 @@ pub const Vm = struct {
                 b.* = NaNBox.from(f64, b.as(f64) / a.as(f64));
                 self.ip += 1;
             } else return error.STACK_UNDERFLOW,
+            // Umm I'm to lazy now to add proper flags support.
             .cmp => if (self.stack.len() > 1) {
                 self.flags = false;
                 const a = self.stack.get(self.stack.len() - 2).?;
@@ -139,6 +191,7 @@ pub const Vm = struct {
 
     pub fn execute_program(self: *Self) !void {
         while (self.ip < self.program.items.len) {
+            if (DEBUG) print("STACK: {}\n", .{self.stack});
             const inst = self.program.items[self.ip];
             try self.execute_instruction(&inst);
         }
