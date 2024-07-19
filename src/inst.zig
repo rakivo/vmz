@@ -1,20 +1,25 @@
-const std = @import("std");
-
+const std    = @import("std");
 const NaNBox = @import("NaNBox.zig").NaNBox;
+const vm     = @import("vm.zig").Vm;
+
+const print = std.debug.print;
 
 pub const InstType = enum {
-    push,
-    swap,
-    fadd,
-    fdiv,
-    fsub,
-    dup,
-    dec,
-    cmp,
-    jne,
-    dmp,
-    pop,
-    add,
+    push, pop,
+
+    fadd, fdiv, fsub, fmul,
+
+    iadd, idiv, isub, imul,
+
+    inc, dec,
+
+    je, jne, jg, jl, jle, jge,
+
+    swap, dup,
+
+    cmp, dmp,
+
+    nop,
 };
 
 pub const None = InstValue.new(void, {});
@@ -36,8 +41,9 @@ pub const InstValue = union(enum) {
             u64        => .{ .U64 = v },
             void       => .{ .None = {} },
             NaNBox     => .{ .Nan = v },
-            []const u8 => if (v.len > 128) {
-                unreachable;
+            []const u8 => if (v.len - 1 >= vm.STR_CAP) {
+                const cap = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
+                @compileError("String length: " ++ v.len ++  " is greater than the maximum capacity: " ++ cap ++ "\n");
             } else return .{ .Str = v },
             else       => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n")
         };
@@ -45,12 +51,12 @@ pub const InstValue = union(enum) {
 };
 
 pub const Inst = struct {
-    ty: InstType,
-    v: InstValue,
+    type: InstType,
+    value: InstValue,
 
     const Self = @This();
 
-    pub inline fn new(ty: InstType, v: InstValue) Self {
-        comptime return .{ .ty = ty, .v = v };
+    pub inline fn new(typ: InstType, value: InstValue) Self {
+        comptime return .{ .type = typ, .value = value };
     }
 };

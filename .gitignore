@@ -1,4 +1,6 @@
 *.o
+*.asm
+
 main
 build
 zig-cache
