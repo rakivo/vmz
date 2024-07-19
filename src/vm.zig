@@ -15,8 +15,8 @@ const Allocator = std.mem.Allocator;
 const DEBUG = false;
 
 pub const program = struct {
-    pub fn new(alloc: Allocator, insts: []const Inst) !Program {
-        var program_ = std.ArrayList(Inst).init(alloc);
+    pub fn new(insts: []const Inst) !Program {
+        var program_ = std.ArrayList(Inst).init(Vm.ALLOCATOR);
         try program_.appendSlice(insts);
         return program_;
     }
@@ -24,7 +24,7 @@ pub const program = struct {
 
 pub const Vm = struct {
     stack: VecDeque(NaNBox),
-    program: Program,
+    program: []const Inst,
     flags: bool = false,
     ip: usize = 0,
 
@@ -35,7 +35,7 @@ pub const Vm = struct {
 
     const ALLOCATOR = std.heap.page_allocator;
 
-    pub inline fn new(_program: Program) !Self {
+    pub inline fn new(_program: []const Inst) !Self {
         return .{
             .stack = try VecDeque(NaNBox).initCapacity(ALLOCATOR, STACK_CAP),
             .program = _program,
@@ -44,7 +44,6 @@ pub const Vm = struct {
 
     pub inline fn deinit(self: Self) void {
         self.stack.deinit();
-        self.program.deinit();
     }
 
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
@@ -63,13 +62,10 @@ pub const Vm = struct {
                         }
 
                         var nans: [STR_CAP]NaNBox = undefined;
-                        var size: usize = 0;
-                        for (str, 0..) |byte, i| {
-                            size = i + 1;
+                        for (str, 0..) |byte, i|
                             nans[i] = NaNBox.from(u8, byte);
-                        }
 
-                        try self.stack.appendSlice(nans[0..size]);
+                        try self.stack.appendSlice(nans[0..str.len]);
                         try self.stack.pushBack(NaNBox.from([]const u8, str));
                     },
                     else => return error.INVALID_TYPE,
@@ -119,7 +115,7 @@ pub const Vm = struct {
                 self.ip += 1;
             },
             .jne => switch (inst.v) {
-                .U64 => |ip| if (self.program.items.len > ip and self.flags) {
+                .U64 => |ip| if (self.program.len > ip and self.flags) {
                     self.ip = ip;
                 } else { self.ip += 1; },
                 else => return error.INVALID_TYPE
@@ -143,13 +139,18 @@ pub const Vm = struct {
                         // print("{s}\n", .{buf.items});
 
                         var bytes: [STR_CAP + 1]u8 = undefined;
-                        for (nans, 0..) |nan, i| bytes[i] = nan.as(u8);
+                        for (nans, 0..) |nan, i|
+                            bytes[i] = nan.as(u8);
+
                         bytes[len] = '\n';
 
-                        _ = writer.write(bytes[0..len + 1]) catch |err| {
+                        const n = writer.write(bytes[0..len + 1]) catch |err| {
                             std.log.err("Failed to write to stdout: {}", .{err});
                             unreachable;
                         };
+
+                        // This certainly should not happen
+                        assert(n == len + 1);
                     },
                 }
                 self.ip += 1;
@@ -190,9 +191,9 @@ pub const Vm = struct {
     }
 
     pub fn execute_program(self: *Self) !void {
-        while (self.ip < self.program.items.len) {
+        while (self.ip < self.program.len) {
             if (DEBUG) print("STACK: {}\n", .{self.stack});
-            const inst = self.program.items[self.ip];
+            const inst = self.program[self.ip];
             try self.execute_instruction(&inst);
         }
     }

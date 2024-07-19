@@ -45,15 +45,9 @@ const str = [_]Inst{
 };
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    var program = try Program.new(arena.allocator(), &pi);
-    defer program.deinit();
-
     const start = std.time.microTimestamp();
 
-    var vm = try Vm.new(program);
+    var vm = try Vm.new(&str);
     defer vm.deinit();
 
     try vm.execute_program();
