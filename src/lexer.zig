@@ -4,12 +4,15 @@ const flag = @import("flag.zig");
 const Flag = flag.Flag;
 const Parser = flag.Parser;
 
+const exit  = std.process.exit;
 const print = std.debug.print;
 
 const src_flag = Flag([]const u8, "-p", "--path", .{
     .help = "path to src file",
     .mandatory = true,
 }).new();
+
+pub const LinizedTokens = std.ArrayList([]const Token);
 
 pub const Token = struct {
     type: Type,
@@ -18,7 +21,7 @@ pub const Token = struct {
 
     const Self = @This();
 
-    pub const Info = packed struct { row: u32, col: u32 };
+    pub const Info = struct { row: u32, col: u32 };
     pub const Type = enum {
         str, int, float, literal
     };
@@ -40,14 +43,18 @@ pub const Lexer = struct {
     const Self = @This();
     const CONTENT_CAP = 1024 * 1024;
 
-    fn lex_file(content: []const u8, arena: anytype) !std.ArrayList([]const Token) {
+    const LexingError = error {
+        NO_CLOSING_QUOTE,
+    };
+
+    fn lex_file(content: []const u8, arena: anytype) !LinizedTokens {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
         var tokens = std.ArrayList([]const Token).init(arena.allocator());
         while (iter.next()) |line| : (row += 1) {
             const words = try split_whitespace(line);
             var line_tokens = try std.ArrayList(Token).initCapacity(arena.allocator(), words.len);
-            defer tokens.append(line_tokens.items) catch unreachable;
+            defer tokens.append(line_tokens.items) catch exit(1);
             for (words) |word| {
                 const tt: LexingError!Token.Type = blk: {
                     if (std.mem.startsWith(u8, word.str, "\"")) {
@@ -60,7 +67,8 @@ pub const Lexer = struct {
                             break :blk .float
                         else
                             break :blk .int;
-                    } else break :blk .literal;
+                    } else
+                        break :blk .literal;
                 };
 
                 const t = Token.new(try tt, .{
@@ -78,7 +86,7 @@ pub const Lexer = struct {
         const file_path = flag_parser.parse(src_flag).?;
         const content = std.fs.cwd().readFileAlloc(arena.allocator(), file_path, CONTENT_CAP) catch |err| {
             print("ERROR: Failed to read file: {s}: {}\n", .{file_path, err});
-            unreachable;
+            exit(1);
         };
         return .{
             .arena = arena,
@@ -90,10 +98,6 @@ pub const Lexer = struct {
     pub inline fn deinit(self: Self) void {
         self.arena.allocator().free(self.tokens.items);
     }
-
-    const LexingError = error {
-        NO_CLOSING_QUOTE,
-    };
 
     const ss = struct {
         s: u32,

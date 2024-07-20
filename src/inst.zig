@@ -1,7 +1,9 @@
 const std    = @import("std");
-const NaNBox = @import("NaNBox.zig").NaNBox;
 const vm     = @import("vm.zig").Vm;
+const NaNBox = @import("NaNBox.zig").NaNBox;
+const Token  = @import("lexer.zig").Token;
 
+const exit  = std.process.exit;
 const print = std.debug.print;
 
 pub const InstType = enum {
@@ -20,6 +22,32 @@ pub const InstType = enum {
     cmp, dmp,
 
     nop,
+
+    const Self = @This();
+
+    pub fn try_from_str(str: []const u8) ?Self {
+        return inline for (std.meta.fields(Self)) |f| {
+            if (std.mem.eql(u8, f.name, str))
+                return @enumFromInt(f.value);
+        } else null;
+    }
+
+    pub fn arg_required(self: Self) bool {
+        return switch (self) {
+            .push, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            else => false,
+        };
+    }
+
+    pub fn expected_type(self: Self) []const Token.Type {
+        return switch (self) {
+            .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str},
+            .push => &[_]Token.Type{.int},
+            .swap => &[_]Token.Type{.int},
+            .dup  => &[_]Token.Type{.int},
+            else  => &[_]Token.Type{},
+        };
+    }
 };
 
 pub const None = InstValue.new(void, {});
@@ -35,15 +63,16 @@ pub const InstValue = union(enum) {
     const Self = @This();
 
     pub inline fn new(comptime T: type, v: T) Self {
-        return comptime switch (T) {
+        return switch (T) {
             i64        => .{ .I64 = v },
             f64        => .{ .F64 = v },
             u64        => .{ .U64 = v },
             void       => .{ .None = {} },
             NaNBox     => .{ .Nan = v },
             []const u8 => if (v.len - 1 >= vm.STR_CAP) {
-                const cap = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
-                @compileError("String length: " ++ v.len ++  " is greater than the maximum capacity: " ++ cap ++ "\n");
+                const cap: usize = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
+                print("String length: {} is greater than the maximum capacity {}\n", .{v.len, cap});
+                exit(1);
             } else return .{ .Str = v },
             else       => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n")
         };
@@ -57,6 +86,6 @@ pub const Inst = struct {
     const Self = @This();
 
     pub inline fn new(typ: InstType, value: InstValue) Self {
-        comptime return .{ .type = typ, .value = value };
+        return .{ .type = typ, .value = value };
     }
 };

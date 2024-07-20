@@ -24,6 +24,7 @@ const std  = @import("std");
 const mem     = std.mem;
 const heap    = std.heap;
 const process = std.process;
+const exit    = process.exit;
 
 pub fn Flag(comptime T: type, comptime short_: []const u8, comptime long_: []const u8, comptime flag: anytype) type {
     return struct {
@@ -47,9 +48,9 @@ pub fn Flag(comptime T: type, comptime short_: []const u8, comptime long_: []con
             var default: ?T       = null;
             var mandatory: bool   = false;
 
-            if (@hasField(@TypeOf(flag), "help"))      help = @as(?[]const u8, @field(flag, "help"));
-            if (@hasField(@TypeOf(flag), "default"))   default = @as(?T, @field(flag, "default"));
-            if (@hasField(@TypeOf(flag), "mandatory")) mandatory = @as(bool, @field(flag, "mandatory"));
+            if (@hasField(@TypeOf(flag), "help"))      help      = @as(?[]const u8, @field(flag, "help"));
+            if (@hasField(@TypeOf(flag), "default"))   default   = @as(?T,          @field(flag, "default"));
+            if (@hasField(@TypeOf(flag), "mandatory")) mandatory = @as(bool,        @field(flag, "mandatory"));
 
             comptime return .{
                 .short     = short_,
@@ -90,7 +91,7 @@ pub const Parser = struct {
     pub fn parse(self: *const Self, flag: anytype) ?flag.type {
         const str = if (self.parse_(flag)) |str| str else {
             std.debug.print("Mandatory `{s}` or `{s}` flag is not provided\n", .{flag.short, flag.long});
-            unreachable;
+            exit(1);
         };
         return switch(flag.type) {
             []const u8 => @as(flag.type, str),

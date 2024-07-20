@@ -1,10 +1,11 @@
-const std       = @import("std");
+const std        = @import("std");
 
-const vm_mod    = @import("vm.zig");
-const inst_mod  = @import("inst.zig");
-const NaNBox    = @import("NaNBox.zig").NaNBox;
-const Lexer     = @import("lexer.zig").Lexer;
-const Parser    = @import("flag.zig").Parser;
+const vm_mod     = @import("vm.zig");
+const inst_mod   = @import("inst.zig");
+const Lexer      = @import("lexer.zig").Lexer;
+const FlagParser = @import("flag.zig").Parser;
+const Parser     = @import("parser.zig").Parser;
+const NaNBox     = @import("NaNBox.zig").NaNBox;
 
 const Vm        = vm_mod.Vm;
 const Program   = vm_mod.program;
@@ -55,19 +56,22 @@ const cmp = [_]Inst{
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-    var parser = try Parser.init();
+    var parser = try FlagParser.init();
     defer parser.deinit();
 
     var lexer = try Lexer.init(&parser, &arena);
     defer lexer.deinit();
 
-    // const start = std.time.microTimestamp();
+    var program = try Parser.parse(&lexer.tokens, arena.allocator());
+    defer program.deinit();
 
-    // var vm = try Vm.new(&pi);
-    // defer vm.deinit();
+    const start = std.time.microTimestamp();
 
-    // try vm.execute_program();
+    var vm = try Vm.new(program.items);
+    defer vm.deinit();
 
-    // const elapsed = std.time.microTimestamp() - start;
-    // std.debug.print("Execution of program took: {d}ms\n", .{elapsed});
+    try vm.execute_program();
+
+    const elapsed = std.time.microTimestamp() - start;
+    std.debug.print("Execution of program took: {d}ms\n", .{elapsed});
 }

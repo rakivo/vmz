@@ -9,9 +9,10 @@ const VecDeque  = @import("VecDeque.zig").VecDeque;
 
 const Flag      = flag_mod.Flag;
 const Flags     = flag_mod.Flags;
-const writer    = std.io.getStdOut().writer();
 const print     = std.debug.print;
+const exit      = std.process.exit;
 const assert    = std.debug.assert;
+const writer    = std.io.getStdOut().writer();
 
 const Program   = std.ArrayList(Inst);
 const Allocator = std.mem.Allocator;
@@ -47,7 +48,7 @@ pub const Vm = struct {
         if (self.flags.is(flag)) {
             self.ip = switch (inst.value) {
                 .U64 => |ip| ip,
-                .Nan => |nan| nan.as(u64),
+                .Nan => |nan| @bitCast(nan.as(i64)),
                 else => return error.INVALID_TYPE
             };
         } else self.ip += 1;
@@ -120,18 +121,13 @@ pub const Vm = struct {
                 self.ip += 1;
             },
 
-            .je,
-            .jne,
-            .jg,
-            .jl,
-            .jle,
-            .jge => self.jmp_if_flag(inst),
+            .je, .jne, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
 
             .dmp => if (self.stack.back()) |v| {
                 switch (v.getType()) {
                     .I64, .U64, .F64, .U8 => print("{d}\n", .{v}),
-                    .Str => if (self.stack.len() > v.as(usize)) {
-                        const len = v.as(usize);
+                    .Str => if (self.stack.len() > v.as(i64)) {
+                        const len: usize = @bitCast(v.as(i64));
                         const nans = self.stack.buf[self.stack.len() - 1 - len .. self.stack.len() - 1];
 
                         // I mean we can go the heap way but it feels redundant
@@ -152,7 +148,7 @@ pub const Vm = struct {
                         bytes[len] = '\n';
                         const n = writer.write(bytes[0..len + 1]) catch |err| {
                             std.log.err("Failed to write to stdout: {}", .{err});
-                            unreachable;
+                            exit(1);
                         };
 
                         // This certainly should not happen
