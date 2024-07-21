@@ -41,7 +41,7 @@ pub const InstType = enum {
     pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
             .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
-            .push => &[_]Token.Type{.int, .str},
+            .push => &[_]Token.Type{.int, .str, .float},
             .swap => &[_]Token.Type{.int},
             .dup  => &[_]Token.Type{.int},
             else  => &[_]Token.Type{},

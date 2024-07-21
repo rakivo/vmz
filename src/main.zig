@@ -62,7 +62,6 @@ pub fn main() !void {
 
     var lexer = Lexer.init(&flag_parser, &arena) catch exit(1);
     defer lexer.deinit();
-    defer lexer.tokens.deinit();
 
     var parser = Parser.new(lexer.file_path, arena.allocator());
 

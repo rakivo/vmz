@@ -30,7 +30,7 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Creates an empty deque.
         /// Deinitialize with `deinit`.
-        pub fn init(allocator: Allocator) Allocator.Error!Self {
+        pub inline fn init(allocator: Allocator) Allocator.Error!Self {
             return initCapacity(allocator, INITIAL_CAPACITY);
         }
 
@@ -55,17 +55,17 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         /// Release all allocated memory.
-        pub fn deinit(self: Self) void {
+        pub inline fn deinit(self: Self) void {
             self.allocator.free(self.buf);
         }
 
         /// Returns the length of the already-allocated buffer.
-        pub fn cap(self: Self) usize {
+        pub inline fn cap(self: Self) usize {
             return self.buf.len;
         }
 
         /// Returns the number of elements in the deque.
-        pub fn len(self: Self) usize {
+        pub inline fn len(self: Self) usize {
             return count(self.tail, self.head, self.cap());
         }
 

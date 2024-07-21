@@ -32,8 +32,7 @@ pub const Vm = struct {
 
     pub const STR_CAP = 128;
     pub const STACK_CAP = 1024;
-
-    const ALLOCATOR = std.heap.page_allocator;
+    pub const INIT_STACK_CAP = STACK_CAP / 8;
 
     pub fn new(_program: []const Inst, _alloc: Allocator) !Self {
         var lm = LabelMap.init(_alloc);
@@ -47,11 +46,10 @@ pub const Vm = struct {
 
             try program.append(inst);
         }
-
         return .{
             .lm = lm,
             .alloc = _alloc,
-            .stack = try VecDeque(NaNBox).initCapacity(_alloc, STACK_CAP),
+            .stack = try VecDeque(NaNBox).initCapacity(_alloc, INIT_STACK_CAP),
             .program = program,
         };
     }
@@ -61,23 +59,65 @@ pub const Vm = struct {
         self.stack.deinit();
     }
 
-    inline fn get_ip(self: *Self, inst: *const Inst) !usize {
+    fn get_ip(self: *Self, inst: *const Inst) !usize {
         return switch (inst.value) {
             .U64 => |ip| ip,
             .Str => |str| if (self.lm.get(str)) |ip| ip else return error.UNDEFINED_SYMBOL,
-            .Nan => |nan| @bitCast(nan.as(i64)),
+            .Nan => |nan| @intCast(nan.as(i64)),
             else => error.INVALID_TYPE
         };
+    }
+
+    inline fn ip_check(self: *Self, ip: usize) !usize {
+        if (ip < 0 or ip > self.program.items.len)
+            return error.INVALID_INSTRUCTION_ACCESS;
+        return ip;
     }
 
     fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
         const flag = Flag.from_inst(inst).?;
         if (self.flags.is(flag)) {
             const ip = try self.get_ip(inst);
-            if (ip < 0 or ip > self.program.items.len)
-                return error.INVALID_INSTRUCTION_ACCESS;
-            self.ip = ip;
+            self.ip = try self.ip_check(ip);
         } else self.ip += 1;
+    }
+
+    fn math_op(self: *Self, comptime T: type, a: T, b: T, ptr: *NaNBox, comptime op: u8) !void {
+        const v = switch (op) {
+            '+' => b + a,
+            '-' => b - a,
+            '/' => if (T == i64) @divFloor(b, a) else b / a,
+            '*' => b * a,
+            else => @compileError(std.fmt.comptimePrint("UNEXPECTED OP: {c}", .{op})),
+        };
+        ptr.* = NaNBox.from(T, v);
+        self.ip += 1;
+    }
+
+    fn perform_mathop(self: *Self, comptime op: u8) !void {
+        if (self.stack.len() > 1) {
+            const a = self.stack.popBack().?;
+            const b = self.stack.back().?;
+            const aty = a.getType();
+            const bty = b.getType();
+
+            if (aty == .I64 or aty == .U64 or aty == .U8) {
+                const ia = a.as(i64);
+                const ib: i64 = switch (bty) {
+                    .I64 => b.as(i64),
+                    .U64 => @intCast(b.as(u64)),
+                    .U8  => @intCast(b.as(u8)),
+                    else => unreachable,
+                };
+                return self.math_op(i64, ia, ib, b, op);
+            }
+
+            return switch (aty) {
+                .F64 => self.math_op(f64, a.as(f64), b.as(f64), b, op),
+                .Str => return error.INVALID_TYPE,
+                else => unreachable,
+            };
+        } else return error.STACK_UNDERFLOW;
     }
 
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
@@ -102,7 +142,16 @@ pub const Vm = struct {
                 self.ip += 1;
             } else return error.STACK_OVERFLOW,
             .pop => if (self.stack.len() > 0) {
-                _ = self.stack.popBack();
+                const n = self.stack.len();
+                switch (self.stack.buf[n - 1].getType()) {
+                    .Str => {
+                        if (n < 1) return error.STACK_UNDERFLOW;
+                        const nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(self.stack.buf[n - 1].as(u8) - 1)), .Str);
+                        self.stack.get(n - 2).?.* = .{.v = nan};
+                        _ = self.stack.popBack();
+                    },
+                    else => _ = self.stack.popBack(),
+                }
                 self.ip += 1;
             } else return error.STACK_UNDERFLOW,
             .swap => switch (inst.value) {
@@ -150,139 +199,52 @@ pub const Vm = struct {
             .je, .jne, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
             .jmp => {
                 const ip = try self.get_ip(inst);
-                if (ip < 0 or ip > self.program.items.len)
-                    return error.INVALID_INSTRUCTION_ACCESS;
-
-                self.ip = ip;
+                self.ip = try self.ip_check(ip);
             },
 
             .dmp => if (self.stack.back()) |v| {
                 switch (v.getType()) {
                     .I64, .U64, .F64, .U8 => print("{d}\n", .{v}),
                     .Str => if (self.stack.len() > v.as(i64)) {
-                        const len: usize = @bitCast(v.as(i64));
-                        const nans = self.stack.buf[self.stack.len() - 1 - len .. self.stack.len() - 1];
-
-                        // I mean we can go the heap way but it feels redundant
-
-                        // const start = self.stack.len() - 1 - len;
-                        // const end = self.stack.len() - 1;
-
-                        // var buf = try std.ArrayList(u8).initCapacity(ALLOCATOR, end - start);
-                        // for (nans) |nan|
-                        //     try buf.append(nan.as(u8));
-
-                        // print("{s}\n", .{buf.items});
-
+                        const len: usize = @intCast(v.as(i64));
+                        const nans = self.stack.buf[self.stack.len() - 1 - len..self.stack.len() - 1];
                         var bytes: [STR_CAP + 1]u8 = undefined;
                         for (nans, 0..) |nan, i|
                             bytes[i] = nan.as(u8);
 
                         bytes[len] = '\n';
-                        const n = writer.write(bytes[0..len + 1]) catch |err| {
+                        _ = writer.write(bytes[0..len + 1]) catch |err| {
                             std.log.err("Failed to write to stdout: {}", .{err});
                             exit(1);
                         };
-
-                        // This certainly should not happen
-                        assert(n == len + 1);
-                    },
+                    } else return error.STACK_UNDERFLOW,
                 }
                 self.ip += 1;
             } else return error.STACK_UNDERFLOW,
-            .iadd => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(i64) and t.is(i64)) {
-                    b.* = NaNBox.from(i64, a.as(i64) + t.as(i64));
-                } else if (a.is(u64) and t.is(u64)) {
-                    b.* = NaNBox.from(u64, a.as(u64) + t.as(u64));
-                } else return error.INVALID_TYPE;
-                self.ip += 1;
-            } else return error.STACK_UNDERFLOW,
-            .isub => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(i64) and t.is(i64)) {
-                    b.* = NaNBox.from(i64, a.as(i64) - t.as(i64));
-                } else if (a.is(u64) and t.is(u64)) {
-                    b.* = NaNBox.from(u64, a.as(u64) - t.as(u64));
-                } else return error.INVALID_TYPE;
-                self.ip += 1;
-            } else return error.STACK_UNDERFLOW,
-            .idiv => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(i64) and t.is(i64)) {
-                    b.* = NaNBox.from(i64, @divFloor(a.as(i64), t.as(i64)));
-                } else if (a.is(u64) and t.is(u64)) {
-                    b.* = NaNBox.from(u64, @divFloor(a.as(u64), t.as(u64)));
-                } else return error.INVALID_TYPE;
-                self.ip += 1;
-            } else return error.STACK_UNDERFLOW,
-            .imul => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(i64) and t.is(i64)) {
-                    b.* = NaNBox.from(i64, a.as(i64) * t.as(i64));
-                } else if (a.is(u64) and t.is(u64)) {
-                    b.* = NaNBox.from(u64, a.as(u64) * t.as(u64));
-                } else return error.INVALID_TYPE;
-                self.ip += 1;
-            } else return error.STACK_UNDERFLOW,
-            .fadd => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(f64) and t.is(f64)) {
-                    b.* = NaNBox.from(f64, b.as(f64) + a.as(f64));
-                    self.ip += 1;
-                } else return error.INVALID_TYPE;
-            } else return error.STACK_UNDERFLOW,
-            .fsub => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(f64) and t.is(f64)) {
-                    b.* = NaNBox.from(f64, b.as(f64) - a.as(f64));
-                    self.ip += 1;
-                } else return error.INVALID_TYPE;
-            } else return error.STACK_UNDERFLOW,
-            .fdiv => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(f64) and t.is(f64)) {
-                    b.* = NaNBox.from(f64, b.as(f64) / a.as(f64));
-                    self.ip += 1;
-                } else return error.INVALID_TYPE;
-            } else return error.STACK_UNDERFLOW,
-            .fmul => if (self.stack.len() > 1) {
-                const a = self.stack.popBack().?;
-                const b = self.stack.back().?;
-                const t = b.*;
-                if (a.is(f64) and t.is(f64)) {
-                    b.* = NaNBox.from(f64, b.as(f64) * a.as(f64));
-                    self.ip += 1;
-                } else return error.INVALID_TYPE;
-            } else return error.STACK_UNDERFLOW,
+            .iadd => try self.perform_mathop('+'),
+            .isub => try self.perform_mathop('-'),
+            .idiv => try self.perform_mathop('/'),
+            .imul => try self.perform_mathop('*'),
+            .fadd => try self.perform_mathop('+'),
+            .fsub => try self.perform_mathop('-'),
+            .fdiv => try self.perform_mathop('/'),
+            .fmul => try self.perform_mathop('*'),
             .cmp => if (self.stack.len() > 1) {
                 const a_ = self.stack.get(self.stack.len() - 2).?;
                 const b_ = self.stack.popBack().?;
 
-                const a: i64 = if (a_.is(u64)) @intCast(a_.as(u64))
-                else if (a_.is(i64)) a_.as(i64)
-                else return error.INVALID_TYPE;
+                const aty = a_.getType();
+                const bty = b_.getType();
 
-                const b: i64 = if (b_.is(u64)) @intCast(b_.as(u64))
-                else if (b_.is(i64)) b_.as(i64)
-                else return error.INVALID_TYPE;
+                if (aty != bty)
+                    return error.COMPARISON_OF_DIFFERENT_TYPES;
 
-                self.flags.cmp(a, b);
+                switch (aty) {
+                    .I64 => self.flags.cmp(i64, a_.as(i64), b_.as(i64)),
+                    .U64 => self.flags.cmp(u64, a_.as(u64), b_.as(u64)),
+                    .F64 => self.flags.cmp(f64, a_.as(f64), b_.as(f64)),
+                    else => return error.INVALID_TYPE
+                }
 
                 if (DEBUG) {
                     print("IS E:  {}\n", .{self.flags.is(Flag.E)});
@@ -302,8 +264,8 @@ pub const Vm = struct {
 
     pub fn execute_program(self: *Self) !void {
         while (!self.halt and self.ip < self.program.items.len) {
-            if (DEBUG) print("STACK: {}\n", .{self.stack});
             const inst = self.program.items[self.ip];
+            if (DEBUG) print("{} : {}\n", .{self.stack, inst.type});
             try self.execute_instruction(&inst);
         }
     }

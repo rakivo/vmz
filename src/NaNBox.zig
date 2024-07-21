@@ -19,7 +19,7 @@ pub const NaNBox = union {
 
     const SUPPORTED_TYPES_MSG = "Supported types: " ++ @typeName(i64) ++ ", " ++ @typeName(u64) ++ ", " ++ @typeName(f64) ++ ", " ++ @typeName(u8) ++ ", []u8";
 
-    inline fn mkInf() f64 {
+    pub inline fn mkInf() f64 {
         return @bitCast(EXP_MASK);
     }
 
@@ -27,7 +27,7 @@ pub const NaNBox = union {
         return self.v != self.v;
     }
 
-    inline fn setType(x: f64, ty: Type) f64 {
+    pub inline fn setType(x: f64, ty: Type) f64 {
         var bits: u64 = @bitCast(x);
         const tv: u64 = @intFromEnum(ty);
         bits = (bits & ~TYPE_MASK) | ((tv & 0xF) << 48);
@@ -40,7 +40,7 @@ pub const NaNBox = union {
         return @enumFromInt((bits & TYPE_MASK) >> 48);
     }
 
-    inline fn setValue(x: f64, value: i64) f64 {
+    pub inline fn setValue(x: f64, value: i64) f64 {
         var bits: u64 = @bitCast(x);
         bits = (bits & ~VALUE_MASK) | (@abs(value) & VALUE_MASK) | if (value < 0) @as(u64, 1 << 63) else 0;
         return @bitCast(bits);
@@ -69,7 +69,6 @@ pub const NaNBox = union {
             i64 => self.getValue(),
             u64 => @intCast(self.getValue()),
             u8  => @intCast(self.getValue()),
-            []u8, []const u8 => @intCast(self.getValue()),
             usize => @intCast(self.getValue()),
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
@@ -88,7 +87,7 @@ pub const NaNBox = union {
 
     pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try switch(self.getType()) {
-            .F64 => writer.print("{d}", .{ self.v }),
+            .F64 => writer.print("{d}f", .{ self.v }),
             .I64 => writer.print("{d}", .{ self.as(i64) }),
             .U64 => writer.print("{d}", .{ self.as(u64) }),
             .U8  => writer.print("{d}", .{ self.as(u8) }),

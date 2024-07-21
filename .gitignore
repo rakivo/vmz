@@ -1,5 +1,6 @@
 *.o
 *.asm
+*.java
 
 main
 build

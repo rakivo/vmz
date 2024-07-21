@@ -42,10 +42,17 @@ pub const Parser = struct {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
                     return self.log_err(Error.FAILED_TO_PARSE, &operand_str);
                 };
-                if (ty == .push) {
-                    return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(i64, @intCast(int))));
-                } else
-                    return Inst.new(ty, InstValue.new(i64, int));
+                if (int >= 0) {
+                    if (ty == .push) {
+                        return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(u64, @intCast(int))));
+                    } else
+                        return Inst.new(ty, InstValue.new(u64, @intCast(int)));
+                } else {
+                    if (ty == .push) {
+                        return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(i64, @intCast(int))));
+                    } else
+                        return Inst.new(ty, InstValue.new(i64, int));
+                }
             },
             .float => {
                 const float = std.fmt.parseFloat(f64, operand_str.value) catch |err| {

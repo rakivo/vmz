@@ -29,7 +29,7 @@ pub const Flags = packed struct {
         comptime return .{};
     }
 
-    pub fn cmp(self: *Self, a: i64, b: i64) void {
+    pub fn cmp(self: *Self, comptime T: type, a: T, b: T) void {
         self._buf = 0;
         if (a == b) {
             self.set(Flag.E);
@@ -39,9 +39,8 @@ pub const Flags = packed struct {
             self.set(Flag.NE);
             if (a > b) {
                 self.set(Flag.G);
-            } else if (a < b) {
+            } else if (a < b)
                 self.set(Flag.L);
-            }
         }
     }
 
