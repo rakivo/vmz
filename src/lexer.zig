@@ -1,5 +1,6 @@
-const std = @import("std");
-const flag = @import("flag.zig");
+const std     = @import("std");
+const flag    = @import("flag.zig");
+const STR_CAP = @import("vm.zig").Vm.STR_CAP;
 
 const Flag = flag.Flag;
 const Parser = flag.Parser;
@@ -23,7 +24,7 @@ pub const Token = struct {
 
     pub const Info = struct { row: u32, col: u32 };
     pub const Type = enum {
-        str, int, float, literal
+        str, int, label, float, literal
     };
 
     pub inline fn new(typ: Type, info: Info, value: []const u8) Self {
@@ -43,23 +44,67 @@ pub const Lexer = struct {
     const Self = @This();
     const CONTENT_CAP = 1024 * 1024;
 
-    const LexingError = error {
+    pub const Error = error {
         NO_CLOSING_QUOTE,
+        UNDEFINED_SYMBOL,
     };
 
-    fn lex_file(content: []const u8, arena: anytype) !LinizedTokens {
+    fn lex_file(file_path: []const u8, content: []const u8, arena: anytype) !LinizedTokens {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
         var tokens = std.ArrayList([]const Token).init(arena.allocator());
         while (iter.next()) |line| : (row += 1) {
-            const words = try split_whitespace(line);
+            if (line.len == 0) continue;
+
+            const words = try split_whitespace(line, arena.allocator());
             var line_tokens = try std.ArrayList(Token).initCapacity(arena.allocator(), words.len);
             defer tokens.append(line_tokens.items) catch exit(1);
-            for (words) |word| {
-                const tt: LexingError!Token.Type = blk: {
+
+            // Found a label
+            if (std.ascii.isASCII(line[0]) and std.mem.endsWith(u8, line, ":")) {
+                if (words.len > 1) {
+                    std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
+                        file_path,
+                        row + 1,
+                        words[0].s + 1,
+                        Error.UNDEFINED_SYMBOL,
+                    });
+                    return Error.UNDEFINED_SYMBOL;
+                }
+
+                const label = words[0].str[0..words[0].str.len - 1];
+                const start = words[0].s;
+
+                const t = Token.new(.label, .{
+                    .row = row, .col = start
+                }, label);
+
+                try line_tokens.append(t);
+                continue;
+            }
+
+            var idx: usize = 0;
+            while (idx < words.len) : (idx += 1) {
+                const word = words[idx];
+                const tt: Error!Token.Type = blk: {
                     if (std.mem.startsWith(u8, word.str, "\"")) {
-                        if (std.mem.endsWith(u8, word.str, "\"")) break :blk .str
-                        else break :blk LexingError.NO_CLOSING_QUOTE;
+                        var strs = try std.ArrayList([]const u8).initCapacity(arena.allocator(), word.str.len);
+                        defer strs.deinit();
+                        while (true) : (idx += 1) {
+                            if (idx >= words.len)
+                                break :blk Error.NO_CLOSING_QUOTE;
+
+                            try strs.append(words[idx].str);
+                            if (std.mem.endsWith(u8, words[idx].str, "\"")) break;
+                        }
+
+                        var str = try std.mem.join(arena.allocator(), " ", strs.items);
+                        str = str[1..str.len - 1];
+                        const t = Token.new(.str, .{
+                            .row = row, .col = word.s
+                        }, str);
+                        try line_tokens.append(t);
+                        continue;
                     }
 
                     if (std.ascii.isDigit(word.str[0])) {
@@ -71,13 +116,25 @@ pub const Lexer = struct {
                         break :blk .literal;
                 };
 
-                const t = Token.new(try tt, .{
+                const t = Token.new(tt catch |err| {
+                    std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
+                        file_path,
+                        row + 1,
+                        word.s + 1,
+                        err
+                    });
+                    return err;
+                }, .{
                     .row = row, .col = word.s
                 }, word.str);
 
                 try line_tokens.append(t);
             }
         }
+
+        // for (tokens.items) |l|
+        //     for (l) |t|
+        //         print("{s}\n", .{t.value});
 
         return tokens;
     }
@@ -91,7 +148,7 @@ pub const Lexer = struct {
         return .{
             .arena = arena,
             .file_path = file_path,
-            .tokens = try lex_file(content, arena)
+            .tokens = try lex_file(file_path, content, arena)
         };
     }
 
@@ -104,8 +161,8 @@ pub const Lexer = struct {
         str: []const u8,
     };
 
-    fn split_whitespace(input: []const u8) ![]const ss {
-        var ret = std.ArrayList(ss).init(std.heap.page_allocator);
+    fn split_whitespace(input: []const u8, alloc: std.mem.Allocator) ![]const ss {
+        var ret = std.ArrayList(ss).init(alloc);
 
         var s: u32 = 0;
         var e: u32 = 0;

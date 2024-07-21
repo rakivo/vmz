@@ -1,7 +1,5 @@
 const std       = @import("std");
-
 const flag_mod  = @import("flags.zig");
-
 const Inst      = @import("inst.zig").Inst;
 const Trap      = @import("trap.zig").Trap;
 const NaNBox    = @import("NaNBox.zig").NaNBox;
@@ -19,10 +17,15 @@ const Allocator = std.mem.Allocator;
 
 const DEBUG = false;
 
+const LabelMap = std.StringHashMap(usize);
+
 pub const Vm = struct {
+    lm: LabelMap,
+    halt: bool = false,
+    alloc: Allocator,
     flags: Flags = Flags.new(),
     stack: VecDeque(NaNBox),
-    program: []const Inst,
+    program: std.ArrayList(Inst),
     ip: usize = 0,
 
     const Self = @This();
@@ -32,25 +35,48 @@ pub const Vm = struct {
 
     const ALLOCATOR = std.heap.page_allocator;
 
-    pub inline fn new(_program: []const Inst) !Self {
+    pub fn new(_program: []const Inst, _alloc: Allocator) !Self {
+        var lm = LabelMap.init(_alloc);
+        var program = try std.ArrayList(Inst).initCapacity(_alloc, _program.len);
+        for (_program, 0..) |inst, ip| {
+            if (inst.type == .label)
+                try switch (inst.value) {
+                    .Str => |str| lm.put(str, ip),
+                    else => return error.INVALID_TYPE
+                };
+
+            try program.append(inst);
+        }
+
         return .{
-            .stack = try VecDeque(NaNBox).initCapacity(ALLOCATOR, STACK_CAP),
-            .program = _program,
+            .lm = lm,
+            .alloc = _alloc,
+            .stack = try VecDeque(NaNBox).initCapacity(_alloc, STACK_CAP),
+            .program = program,
         };
     }
 
-    pub inline fn deinit(self: Self) void {
+    pub inline fn deinit(self: *Self) void {
+        self.lm.deinit();
         self.stack.deinit();
     }
 
-    pub inline fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
+    inline fn get_ip(self: *Self, inst: *const Inst) !usize {
+        return switch (inst.value) {
+            .U64 => |ip| ip,
+            .Str => |str| if (self.lm.get(str)) |ip| ip else return error.UNDEFINED_SYMBOL,
+            .Nan => |nan| @bitCast(nan.as(i64)),
+            else => error.INVALID_TYPE
+        };
+    }
+
+    fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
         const flag = Flag.from_inst(inst).?;
         if (self.flags.is(flag)) {
-            self.ip = switch (inst.value) {
-                .U64 => |ip| ip,
-                .Nan => |nan| @bitCast(nan.as(i64)),
-                else => return error.INVALID_TYPE
-            };
+            const ip = try self.get_ip(inst);
+            if (ip < 0 or ip > self.program.items.len)
+                return error.INVALID_INSTRUCTION_ACCESS;
+            self.ip = ip;
         } else self.ip += 1;
     }
 
@@ -122,6 +148,13 @@ pub const Vm = struct {
             },
 
             .je, .jne, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
+            .jmp => {
+                const ip = try self.get_ip(inst);
+                if (ip < 0 or ip > self.program.items.len)
+                    return error.INVALID_INSTRUCTION_ACCESS;
+
+                self.ip = ip;
+            },
 
             .dmp => if (self.stack.back()) |v| {
                 switch (v.getType()) {
@@ -156,7 +189,7 @@ pub const Vm = struct {
                     },
                 }
                 self.ip += 1;
-            },
+            } else return error.STACK_UNDERFLOW,
             .iadd => if (self.stack.len() > 1) {
                 const a = self.stack.popBack().?;
                 const b = self.stack.back().?;
@@ -261,14 +294,16 @@ pub const Vm = struct {
                 }
 
                 self.ip += 1;
-            }
+            },
+            .halt => self.halt = true,
+            .label => self.ip += 1
         };
     }
 
     pub fn execute_program(self: *Self) !void {
-        while (self.ip < self.program.len) {
+        while (!self.halt and self.ip < self.program.items.len) {
             if (DEBUG) print("STACK: {}\n", .{self.stack});
-            const inst = self.program[self.ip];
+            const inst = self.program.items[self.ip];
             try self.execute_instruction(&inst);
         }
     }

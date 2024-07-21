@@ -1,5 +1,4 @@
 const std        = @import("std");
-
 const vm_mod     = @import("vm.zig");
 const inst_mod   = @import("inst.zig");
 const Lexer      = @import("lexer.zig").Lexer;
@@ -12,6 +11,8 @@ const Program   = vm_mod.program;
 
 const Inst      = inst_mod.Inst;
 const InstValue = inst_mod.InstValue;
+
+const exit = std.process.exit;
 
 const pi = [_]Inst{
     Inst.new(.push, InstValue.new(NaNBox, NaNBox.from(f64, 4.0))),
@@ -56,22 +57,25 @@ const cmp = [_]Inst{
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-    var parser = try FlagParser.init();
-    defer parser.deinit();
+    var flag_parser = try FlagParser.init();
+    defer flag_parser.deinit();
 
-    var lexer = try Lexer.init(&parser, &arena);
+    var lexer = Lexer.init(&flag_parser, &arena) catch exit(1);
     defer lexer.deinit();
+    defer lexer.tokens.deinit();
 
-    var program = try Parser.parse(&lexer.tokens, arena.allocator());
+    var parser = Parser.new(lexer.file_path, arena.allocator());
+
+    const program = parser.parse(&lexer.tokens) catch exit(1);
     defer program.deinit();
 
     const start = std.time.microTimestamp();
 
-    var vm = try Vm.new(program.items);
+    var vm = try Vm.new(program.items, arena.allocator());
     defer vm.deinit();
 
     try vm.execute_program();
 
     const elapsed = std.time.microTimestamp() - start;
-    std.debug.print("Execution of program took: {d}ms\n", .{elapsed});
+    std.debug.print("Execution of program took: {d}μs\n", .{elapsed});
 }

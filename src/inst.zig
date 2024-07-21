@@ -6,6 +6,7 @@ const Token  = @import("lexer.zig").Token;
 const exit  = std.process.exit;
 const print = std.debug.print;
 
+// Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
     push, pop,
 
@@ -15,13 +16,11 @@ pub const InstType = enum {
 
     inc, dec,
 
-    je, jne, jg, jl, jle, jge,
+    jmp, je, jne, jg, jl, jle, jge,
 
     swap, dup,
 
-    cmp, dmp,
-
-    nop,
+    cmp, dmp, nop, label, halt,
 
     const Self = @This();
 
@@ -34,15 +33,15 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .push, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
             else => false,
         };
     }
 
-    pub fn expected_type(self: Self) []const Token.Type {
+    pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
-            .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str},
-            .push => &[_]Token.Type{.int},
+            .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
+            .push => &[_]Token.Type{.int, .str},
             .swap => &[_]Token.Type{.int},
             .dup  => &[_]Token.Type{.int},
             else  => &[_]Token.Type{},
@@ -69,11 +68,13 @@ pub const InstValue = union(enum) {
             u64        => .{ .U64 = v },
             void       => .{ .None = {} },
             NaNBox     => .{ .Nan = v },
-            []const u8 => if (v.len - 1 >= vm.STR_CAP) {
-                const cap: usize = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
-                print("String length: {} is greater than the maximum capacity {}\n", .{v.len, cap});
-                exit(1);
-            } else return .{ .Str = v },
+            []const u8 => if (v.len > 1) {
+                if (v.len - 1 >= vm.STR_CAP) {
+                    const cap: usize = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
+                    print("String length: {} is greater than the maximum capacity {}\n", .{v.len, cap});
+                    exit(1);
+                } else return .{ .Str = v };
+            } else return .{ .Str = &[_]u8{} },
             else       => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n")
         };
     }
