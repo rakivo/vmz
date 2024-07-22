@@ -38,7 +38,7 @@ pub const Token = struct {
 
 pub const Lexer = struct {
     file_path: []const u8,
-    arena: *std.heap.ArenaAllocator,
+    alloc: std.mem.Allocator,
     tokens: std.ArrayList([]const Token),
 
     const Self = @This();
@@ -49,15 +49,15 @@ pub const Lexer = struct {
         UNDEFINED_SYMBOL,
     };
 
-    fn lex_file(file_path: []const u8, content: []const u8, arena: anytype) !LinizedTokens {
+    fn lex_file(file_path: []const u8, content: []const u8, alloc: std.mem.Allocator) !LinizedTokens {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
-        var tokens = std.ArrayList([]const Token).init(arena.allocator());
+        var tokens = std.ArrayList([]const Token).init(alloc);
         while (iter.next()) |line| : (row += 1) {
             if (line.len == 0) continue;
 
-            const words = try split_whitespace(line, arena.allocator());
-            var line_tokens = try std.ArrayList(Token).initCapacity(arena.allocator(), words.len);
+            const words = try split_whitespace(line, alloc);
+            var line_tokens = try std.ArrayList(Token).initCapacity(alloc, words.len);
             defer tokens.append(line_tokens.items) catch exit(1);
 
             // Found a label
@@ -88,7 +88,7 @@ pub const Lexer = struct {
                 const word = words[idx];
                 const tt: Error!Token.Type = blk: {
                     if (std.mem.startsWith(u8, word.str, "\"")) {
-                        var strs = try std.ArrayList([]const u8).initCapacity(arena.allocator(), word.str.len);
+                        var strs = try std.ArrayList([]const u8).initCapacity(alloc, word.str.len);
                         defer strs.deinit();
                         while (true) : (idx += 1) {
                             if (idx >= words.len)
@@ -98,7 +98,7 @@ pub const Lexer = struct {
                             if (std.mem.endsWith(u8, words[idx].str, "\"")) break;
                         }
 
-                        var str = try std.mem.join(arena.allocator(), " ", strs.items);
+                        var str = try std.mem.join(alloc, " ", strs.items);
                         str = str[1..str.len - 1];
                         const t = Token.new(.str, .{
                             .row = row, .col = word.s
@@ -132,28 +132,24 @@ pub const Lexer = struct {
             }
         }
 
-        // for (tokens.items) |l|
-        //     for (l) |t|
-        //         print("{s}\n", .{t.value});
-
         return tokens;
     }
 
-    pub fn init(flag_parser: *Parser, arena: *std.heap.ArenaAllocator) !Self {
+    pub fn init(flag_parser: *Parser, alloc: std.mem.Allocator) !Self {
         const file_path = flag_parser.parse(src_flag).?;
-        const content = std.fs.cwd().readFileAlloc(arena.allocator(), file_path, CONTENT_CAP) catch |err| {
+        const content = std.fs.cwd().readFileAlloc(alloc, file_path, CONTENT_CAP) catch |err| {
             print("ERROR: Failed to read file: {s}: {}\n", .{file_path, err});
             exit(1);
         };
         return .{
-            .arena = arena,
+            .alloc = alloc,
             .file_path = file_path,
-            .tokens = try lex_file(file_path, content, arena)
+            .tokens = try lex_file(file_path, content, alloc)
         };
     }
 
     pub inline fn deinit(self: Self) void {
-        self.arena.allocator().free(self.tokens.items);
+        self.alloc.free(self.tokens.items);
     }
 
     const ss = struct {

@@ -1,6 +1,3 @@
-// This code is stolen from: <https://github.com/magurotuna/zig-deque>
-// ATTENTION ! ^^^^^^^^^^^^
-
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
@@ -55,45 +52,50 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         /// Release all allocated memory.
-        pub inline fn deinit(self: Self) void {
+        pub inline fn deinit(self: *Self) void {
             self.allocator.free(self.buf);
         }
 
         /// Returns the length of the already-allocated buffer.
-        pub inline fn cap(self: Self) usize {
+        pub inline fn cap(self: *const Self) usize {
             return self.buf.len;
         }
 
         /// Returns the number of elements in the deque.
-        pub inline fn len(self: Self) usize {
+        pub inline fn len(self: *const Self) usize {
             return count(self.tail, self.head, self.cap());
         }
 
         /// Gets the pointer to the element with the given index, if any.
         /// Otherwise it returns `null`.
-        pub fn get(self: Self, index: usize) ?*T {
-            if (index >= self.len()) return null;
-
+        pub inline fn get(self: *Self, index: usize) ?*T {
             const idx = self.wrapAdd(self.tail, index);
             return &self.buf[idx];
         }
 
         /// Gets the pointer to the first element, if any.
-        pub fn front(self: Self) ?*T {
+        pub inline fn front(self: *Self) ?*T {
             return self.get(0);
         }
 
         /// Gets the pointer to the last element, if any.
-        pub fn back(self: Self) ?*T {
+        pub inline fn back(self: *Self) ?*T {
             const last_idx = math.sub(usize, self.len(), 1) catch return null;
             return self.get(last_idx);
         }
 
+        /// Swaps two elements
+        pub inline fn swap(self: *Self, a_: usize, b_: usize) void {
+            const a = self.get(a_).?;
+            const b = self.get(b_).?;
+            const t = b.*;
+            b.* = a.*;
+            a.* = t;
+        }
+
         /// Adds the given element to the back of the deque.
         pub fn pushBack(self: *Self, item: T) Allocator.Error!void {
-            if (self.isFull()) {
-                try self.grow();
-            }
+            if (self.isFull()) try self.grow();
 
             const head = self.head;
             self.head = self.wrapAdd(self.head, 1);
@@ -102,9 +104,7 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Adds the given element to the front of the deque.
         pub fn pushFront(self: *Self, item: T) Allocator.Error!void {
-            if (self.isFull()) {
-                try self.grow();
-            }
+            if (self.isFull()) try self.grow();
 
             self.tail = self.wrapSub(self.tail, 1);
             const tail = self.tail;
@@ -113,8 +113,6 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Pops and returns the last element of the deque.
         pub fn popBack(self: *Self) ?T {
-            if (self.len() == 0) return null;
-
             self.head = self.wrapSub(self.head, 1);
             const head = self.head;
             const item = self.buf[head];
@@ -124,8 +122,6 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Pops and returns the first element of the deque.
         pub fn popFront(self: *Self) ?T {
-            if (self.len() == 0) return null;
-
             const tail = self.tail;
             self.tail = self.wrapAdd(self.tail, 1);
             const item = self.buf[tail];
@@ -134,7 +130,7 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         /// Adds all the elements in the given slice to the back of the deque.
-        pub fn appendSlice(self: *Self, items: []const T) Allocator.Error!void {
+        pub inline fn appendSlice(self: *Self, items: []const T) Allocator.Error!void {
             for (items) |item| {
                 try self.pushBack(item);
             }
@@ -142,8 +138,6 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Adds all the elements in the given slice to the front of the deque.
         pub fn prependSlice(self: *Self, items: []const T) Allocator.Error!void {
-            if (items.len == 0) return;
-
             var i: usize = items.len - 1;
 
             while (true) : (i -= 1) {
@@ -155,12 +149,30 @@ pub fn VecDeque(comptime T: type) type {
 
         /// Returns an iterator over the deque.
         /// Modifying the deque may invalidate this iterator.
-        pub fn iterator(self: Self) Iterator {
+        pub inline fn iterator(self: *const Self) Iterator {
             return .{
                 .head = self.head,
                 .tail = self.tail,
                 .ring = self.buf,
             };
+        }
+
+        pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            try writer.writeAll("VecDeque(");
+            try std.fmt.format(writer, "{}", .{T});
+            try writer.writeAll(") { .buf = [");
+
+            var it = self.iterator();
+            if (it.next()) |val| try writer.print("{any}", .{val});
+            while (it.next()) |val| try writer.print(", {any}", .{val});
+
+            try writer.writeAll("], .head = ");
+            try std.fmt.format(writer, "{}", .{self.head});
+            try writer.writeAll(", .tail = ");
+            try std.fmt.format(writer, "{}", .{self.tail});
+            try writer.writeAll(", .len = ");
+            try std.fmt.format(writer, "{}", .{self.len()});
+            try writer.writeAll(" }");
         }
 
         pub const Iterator = struct {
@@ -184,23 +196,12 @@ pub fn VecDeque(comptime T: type) type {
             }
         };
 
-        pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            var it = self.iterator();
-            try writer.writeAll("[");
-
-            if (it.next()) |val| try writer.print("{any}", .{val});
-            while (it.next()) |val| try writer.print(", {any}", .{val});
-
-            try writer.writeAll("]");
-        }
-
         /// Returns `true` if the buffer is at full capacity.
-        fn isFull(self: Self) bool {
+        inline fn isFull(self: *const Self) bool {
             return self.cap() - self.len() == 1;
         }
 
         fn grow(self: *Self) Allocator.Error!void {
-            assert(self.isFull());
             const old_cap = self.cap();
 
             // Reserve additional space to accomodate more items
@@ -208,9 +209,6 @@ pub fn VecDeque(comptime T: type) type {
 
             // Update `tail` and `head` pointers accordingly
             self.handleCapacityIncrease(old_cap);
-
-            assert(self.cap() >= old_cap * 2);
-            assert(!self.isFull());
         }
 
         /// Updates `tail` and `head` values to handle the fact that we just reallocated the internal buffer.
@@ -269,28 +267,170 @@ pub fn VecDeque(comptime T: type) type {
             assert(self.tail < self.cap());
         }
 
-        fn copyNonOverlapping(self: *Self, dest: usize, src: usize, length: usize) void {
+        inline fn copyNonOverlapping(self: *Self, dest: usize, src: usize, length: usize) void {
             assert(dest + length <= self.cap());
             assert(src + length <= self.cap());
             @memcpy(self.buf[dest .. dest + length], self.buf[src .. src + length]);
         }
 
-        fn wrapAdd(self: Self, idx: usize, addend: usize) usize {
+        inline fn wrapAdd(self: *const Self, idx: usize, addend: usize) usize {
             return wrapIndex(idx +% addend, self.cap());
         }
 
-        fn wrapSub(self: Self, idx: usize, subtrahend: usize) usize {
+        inline fn wrapSub(self: *const Self, idx: usize, subtrahend: usize) usize {
             return wrapIndex(idx -% subtrahend, self.cap());
         }
     };
 }
 
-fn count(tail: usize, head: usize, size: usize) usize {
-    assert(math.isPowerOfTwo(size));
+inline fn count(tail: usize, head: usize, size: usize) usize {
     return (head -% tail) & (size - 1);
 }
 
-fn wrapIndex(index: usize, size: usize) usize {
-    assert(math.isPowerOfTwo(size));
+inline fn wrapIndex(index: usize, size: usize) usize {
     return index & (size - 1);
+}
+
+test "VecDeque works" {
+    const testing = std.testing;
+
+    var deque = try VecDeque(usize).init(testing.allocator);
+    defer deque.deinit();
+
+    // empty deque
+    try testing.expectEqual(@as(usize, 0), deque.len());
+    try testing.expect(deque.get(0) == null);
+    try testing.expect(deque.front() == null);
+    try testing.expect(deque.back() == null);
+    try testing.expect(deque.popBack() == null);
+    try testing.expect(deque.popFront() == null);
+
+    // pushBack
+    try deque.pushBack(101);
+    try testing.expectEqual(@as(usize, 1), deque.len());
+    try testing.expectEqual(@as(usize, 101), deque.get(0).?.*);
+    try testing.expectEqual(@as(usize, 101), deque.front().?.*);
+    try testing.expectEqual(@as(usize, 101), deque.back().?.*);
+
+    // pushFront
+    try deque.pushFront(100);
+    try testing.expectEqual(@as(usize, 2), deque.len());
+    try testing.expectEqual(@as(usize, 100), deque.get(0).?.*);
+    try testing.expectEqual(@as(usize, 100), deque.front().?.*);
+    try testing.expectEqual(@as(usize, 101), deque.get(1).?.*);
+    try testing.expectEqual(@as(usize, 101), deque.back().?.*);
+
+    // more items
+    {
+        var i: usize = 99;
+        while (true) : (i -= 1) {
+            try deque.pushFront(i);
+            if (i == 0) break;
+        }
+    }
+    {
+        var i: usize = 102;
+        while (i < 200) : (i += 1) {
+            try deque.pushBack(i);
+        }
+    }
+
+    try testing.expectEqual(@as(usize, 200), deque.len());
+    {
+        var i: usize = 0;
+        while (i < deque.len()) : (i += 1) {
+            try testing.expectEqual(i, deque.get(i).?.*);
+        }
+    }
+    {
+        var i: usize = 0;
+        var it = deque.iterator();
+        while (it.next()) |val| : (i += 1) {
+            try testing.expectEqual(i, val.*);
+        }
+        try testing.expectEqual(@as(usize, 200), i);
+    }
+}
+
+test "initCapacity with too large capacity" {
+    const testing = std.testing;
+
+    var deque = try VecDeque(i32).initCapacity(testing.allocator, math.maxInt(usize));
+    defer deque.deinit();
+
+    // The specified capacity `math.maxInt(usize)` was too large.
+    // Internally this is just ignored, and the default capacity is used instead.
+    try testing.expectEqual(@as(usize, 8), deque.buf.len);
+}
+
+test "appendSlice and prependSlice" {
+    const testing = std.testing;
+
+    var deque = try VecDeque(usize).init(testing.allocator);
+    defer deque.deinit();
+
+    try deque.prependSlice(&[_]usize{ 1, 2, 3, 4, 5, 6 });
+    try deque.appendSlice(&[_]usize{ 7, 8, 9 });
+    try deque.prependSlice(&[_]usize{0});
+    try deque.appendSlice(&[_]usize{ 10, 11, 12, 13, 14 });
+
+    {
+        var i: usize = 0;
+        while (i <= 14) : (i += 1) {
+            try testing.expectEqual(i, deque.get(i).?.*);
+        }
+    }
+}
+
+test "format" {
+    const testing = std.testing;
+
+    var deque = try VecDeque(usize).init(testing.allocator);
+    defer deque.deinit();
+
+    try deque.pushBack(69);
+    try deque.pushBack(420);
+
+    std.debug.print("{}\n", .{deque});
+}
+
+test "nextBack" {
+    const testing = std.testing;
+
+    var deque = try VecDeque(usize).init(testing.allocator);
+    defer deque.deinit();
+
+    try deque.appendSlice(&[_]usize{ 5, 4, 3, 2, 1, 0 });
+
+    {
+        var i: usize = 0;
+        var it = deque.iterator();
+        while (it.nextBack()) |val| : (i += 1) {
+            try testing.expectEqual(i, val.*);
+        }
+    }
+}
+
+test "code sample in README" {
+    var deque = try VecDeque(usize).init(std.testing.allocator);
+    defer deque.deinit();
+
+    try deque.pushBack(1);
+    try deque.pushBack(2);
+    try deque.pushFront(0);
+
+    std.debug.assert(deque.get(0).?.* == @as(usize, 0));
+    std.debug.assert(deque.get(1).?.* == @as(usize, 1));
+    std.debug.assert(deque.get(2).?.* == @as(usize, 2));
+    std.debug.assert(deque.get(3) == null);
+
+    var it = deque.iterator();
+    var sum: usize = 0;
+    while (it.next()) |val| {
+        sum += val.*;
+    }
+    std.debug.assert(sum == 3);
+
+    std.debug.assert(deque.popFront().? == @as(usize, 0));
+    std.debug.assert(deque.popBack().? == @as(usize, 2));
 }

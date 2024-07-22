@@ -25,7 +25,7 @@ pub const Flags = packed struct {
 
     const ONE: u8 = 1;
 
-    pub fn new() Self {
+    pub inline fn new() Self {
         comptime return .{};
     }
 

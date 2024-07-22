@@ -12,12 +12,12 @@ const exit      = std.process.exit;
 const assert    = std.debug.assert;
 const writer    = std.io.getStdOut().writer();
 
-const Program   = std.ArrayList(Inst);
 const Allocator = std.mem.Allocator;
 
-const DEBUG = false;
+pub const DEBUG = false;
 
-const LabelMap = std.StringHashMap(usize);
+pub const Program   = std.ArrayList(Inst);
+pub const LabelMap = std.StringHashMap(usize);
 
 pub const Vm = struct {
     lm: LabelMap,
@@ -25,7 +25,7 @@ pub const Vm = struct {
     alloc: Allocator,
     flags: Flags = Flags.new(),
     stack: VecDeque(NaNBox),
-    program: std.ArrayList(Inst),
+    program: []const Inst,
     ip: usize = 0,
 
     const Self = @This();
@@ -34,18 +34,7 @@ pub const Vm = struct {
     pub const STACK_CAP = 1024;
     pub const INIT_STACK_CAP = STACK_CAP / 8;
 
-    pub fn new(_program: []const Inst, _alloc: Allocator) !Self {
-        var lm = LabelMap.init(_alloc);
-        var program = try std.ArrayList(Inst).initCapacity(_alloc, _program.len);
-        for (_program, 0..) |inst, ip| {
-            if (inst.type == .label)
-                try switch (inst.value) {
-                    .Str => |str| lm.put(str, ip),
-                    else => return error.INVALID_TYPE
-                };
-
-            try program.append(inst);
-        }
+    pub fn new(program: []const Inst, lm: LabelMap, _alloc: Allocator) !Self {
         return .{
             .lm = lm,
             .alloc = _alloc,
@@ -59,7 +48,7 @@ pub const Vm = struct {
         self.stack.deinit();
     }
 
-    fn get_ip(self: *Self, inst: *const Inst) !usize {
+    inline fn get_ip(self: *Self, inst: *const Inst) !usize {
         return switch (inst.value) {
             .U64 => |ip| ip,
             .Str => |str| if (self.lm.get(str)) |ip| ip else return error.UNDEFINED_SYMBOL,
@@ -69,7 +58,7 @@ pub const Vm = struct {
     }
 
     inline fn ip_check(self: *Self, ip: usize) !usize {
-        if (ip < 0 or ip > self.program.items.len)
+        if (ip < 0 or ip > self.program.len)
             return error.INVALID_INSTRUCTION_ACCESS;
         return ip;
     }
@@ -82,7 +71,7 @@ pub const Vm = struct {
         } else self.ip += 1;
     }
 
-    fn math_op(self: *Self, comptime T: type, a: T, b: T, ptr: *NaNBox, comptime op: u8) !void {
+    inline fn math_op(self: *Self, comptime T: type, a: T, b: T, ptr: *NaNBox, comptime op: u8) !void {
         const v = switch (op) {
             '+' => b + a,
             '-' => b - a,
@@ -94,30 +83,19 @@ pub const Vm = struct {
         self.ip += 1;
     }
 
-    fn perform_mathop(self: *Self, comptime op: u8) !void {
-        if (self.stack.len() > 1) {
-            const a = self.stack.popBack().?;
-            const b = self.stack.back().?;
-            const aty = a.getType();
-            const bty = b.getType();
+    inline fn perform_mathop(self: *Self, comptime op: u8) !void {
+        if (self.stack.len() < 2)
+            return error.STACK_UNDERFLOW;
 
-            if (aty == .I64 or aty == .U64 or aty == .U8) {
-                const ia = a.as(i64);
-                const ib: i64 = switch (bty) {
-                    .I64 => b.as(i64),
-                    .U64 => @intCast(b.as(u64)),
-                    .U8  => @intCast(b.as(u8)),
-                    else => unreachable,
-                };
-                return self.math_op(i64, ia, ib, b, op);
-            }
+        const a = self.stack.popBack().?;
+        const b = self.stack.back().?;
 
-            return switch (aty) {
-                .F64 => self.math_op(f64, a.as(f64), b.as(f64), b, op),
-                .Str => return error.INVALID_TYPE,
-                else => unreachable,
-            };
-        } else return error.STACK_UNDERFLOW;
+        return switch (a.getType()) {
+            .I64 => self.math_op(i64, a.as(i64), b.as(i64), b, op),
+            .U64 => self.math_op(u64, a.as(u64), b.as(u64), b, op),
+            .F64 => self.math_op(f64, a.as(f64), b.as(f64), b, op),
+            else => return error.INVALID_TYPE,
+        };
     }
 
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
@@ -156,12 +134,9 @@ pub const Vm = struct {
             } else return error.STACK_UNDERFLOW,
             .swap => switch (inst.value) {
                 .U64 => |idx_| if (self.stack.len() > idx_) {
-                    const back = self.stack.back().?;
-                    const idx = self.stack.len() - idx_ - 1;
-                    const nth = self.stack.get(idx).?;
-                    const t = nth.*;
-                    nth.* = back.*;
-                    back.* = t;
+                    const len = self.stack.len();
+                    const idx = len - idx_ - 1;
+                    self.stack.swap(idx, len - 1);
                     self.ip += 1;
                 } else return error.STACK_UNDERFLOW,
                 else => return error.INVALID_TYPE
@@ -204,7 +179,14 @@ pub const Vm = struct {
 
             .dmp => if (self.stack.back()) |v| {
                 switch (v.getType()) {
-                    .I64, .U64, .F64, .U8 => print("{d}\n", .{v}),
+                    .I64, .U64, .F64, .U8 => {
+                        var buf: [32]u8 = undefined;
+                        const ret = try std.fmt.bufPrint(&buf, "{}\n", .{v});
+                        _ = writer.write(ret) catch |err| {
+                            std.log.err("Failed to write to stdout: {}", .{err});
+                            exit(1);
+                        };
+                    },
                     .Str => if (self.stack.len() > v.as(i64)) {
                         const len: usize = @intCast(v.as(i64));
                         const nans = self.stack.buf[self.stack.len() - 1 - len..self.stack.len() - 1];
@@ -230,19 +212,13 @@ pub const Vm = struct {
             .fdiv => try self.perform_mathop('/'),
             .fmul => try self.perform_mathop('*'),
             .cmp => if (self.stack.len() > 1) {
-                const a_ = self.stack.get(self.stack.len() - 2).?;
-                const b_ = self.stack.popBack().?;
+                const a = self.stack.get(self.stack.len() - 2).?;
+                const b = self.stack.popBack().?;
 
-                const aty = a_.getType();
-                const bty = b_.getType();
-
-                if (aty != bty)
-                    return error.COMPARISON_OF_DIFFERENT_TYPES;
-
-                switch (aty) {
-                    .I64 => self.flags.cmp(i64, a_.as(i64), b_.as(i64)),
-                    .U64 => self.flags.cmp(u64, a_.as(u64), b_.as(u64)),
-                    .F64 => self.flags.cmp(f64, a_.as(f64), b_.as(f64)),
+                switch (a.getType()) {
+                    .I64 => self.flags.cmp(i64, a.as(i64), b.as(i64)),
+                    .U64 => self.flags.cmp(u64, a.as(u64), b.as(u64)),
+                    .F64 => self.flags.cmp(f64, a.as(f64), b.as(f64)),
                     else => return error.INVALID_TYPE
                 }
 
@@ -263,8 +239,8 @@ pub const Vm = struct {
     }
 
     pub fn execute_program(self: *Self) !void {
-        while (!self.halt and self.ip < self.program.items.len) {
-            const inst = self.program.items[self.ip];
+        while (!self.halt and self.ip < self.program.len) {
+            const inst = self.program[self.ip];
             if (DEBUG) print("{} : {}\n", .{self.stack, inst.type});
             try self.execute_instruction(&inst);
         }

@@ -1,6 +1,6 @@
 *.o
-*.asm
 *.java
+FlameGraph
 
 main
 build

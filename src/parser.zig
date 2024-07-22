@@ -1,14 +1,16 @@
 const std    = @import("std");
 const inst   = @import("inst.zig");
+const vm     = @import("vm.zig");
 const lexer  = @import("lexer.zig");
 const NaNBox = @import("NaNBox.zig").NaNBox;
 
-const Inst = inst.Inst;
-const Info = lexer.Token.Info;
-const InstType = inst.InstType;
-const InstValue = inst.InstValue;
-
-const Token = lexer.Token;
+const Inst          = inst.Inst;
+const LabelMap      = vm.LabelMap;
+const Program       = vm.Program;
+const Info          = lexer.Token.Info;
+const InstType      = inst.InstType;
+const InstValue     = inst.InstValue;
+const Token         = lexer.Token;
 const LinizedTokens = lexer.LinizedTokens;
 
 pub const Parser = struct {
@@ -74,13 +76,22 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parse(self: *Self, ts: *LinizedTokens) !std.ArrayList(Inst) {
+    pub const pl = struct {
+        program: Program,
+        lm: LabelMap
+    };
+
+    pub fn parse(self: *Self, ts: *LinizedTokens) !pl {
+        var ip: usize = 0;
+        var lm = LabelMap.init(self.alloc);
         var program = std.ArrayList(Inst).init(self.alloc);
         for (ts.items) |line| {
             var idx: usize = 0;
             while (idx < line.len) : (idx += 1) {
                 if (line[idx].type == .label) {
                     try program.append(Inst.new(.label, InstValue.new([]const u8, line[idx].value)));
+                    try lm.put(line[idx].value, ip);
+                    ip += 1;
                     continue;
                 }
 
@@ -91,6 +102,7 @@ pub const Parser = struct {
                 const ty = tyo.?;
                 if (!ty.arg_required()) {
                     try program.append(Inst.new(ty, inst.None));
+                    ip += 1;
                     continue;
                 }
 
@@ -106,9 +118,13 @@ pub const Parser = struct {
                 }
 
                 try program.append(try self.parse_inst(ty, operand));
+                ip += 1;
             }
         }
 
-        return program;
+        return pl{
+            .program = program,
+            .lm = lm
+        };
     }
 };

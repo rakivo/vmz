@@ -1,10 +1,10 @@
 const std    = @import("std");
 const vm     = @import("vm.zig").Vm;
-const NaNBox = @import("NaNBox.zig").NaNBox;
 const Token  = @import("lexer.zig").Token;
+const NaNBox = @import("NaNBox.zig").NaNBox;
 
-const exit  = std.process.exit;
 const print = std.debug.print;
+const exit  = std.process.exit;
 
 // Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
