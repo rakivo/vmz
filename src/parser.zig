@@ -6,8 +6,9 @@ const NaNBox = @import("NaNBox.zig").NaNBox;
 
 const Inst          = inst.Inst;
 const LabelMap      = vm.LabelMap;
+const InstMap       = vm.InstMap;
 const Program       = vm.Program;
-const Info          = lexer.Token.Info;
+const Loc           = lexer.Token.Loc;
 const InstType      = inst.InstType;
 const InstValue     = inst.InstValue;
 const Token         = lexer.Token;
@@ -29,8 +30,8 @@ pub const Parser = struct {
     inline fn log_err(self: *const Self, err: Error, t: *const Token) Error {
         std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
             self.file_path,
-            t.info.row + 1,
-            t.info.col + 1,
+            t.loc.row + 1,
+            t.loc.col + 1,
             err,
         });
         return err;
@@ -76,20 +77,24 @@ pub const Parser = struct {
         };
     }
 
-    pub const pl = struct {
+    pub const Parsed = struct {
         program: Program,
-        lm: LabelMap
+        lm: LabelMap,
+        im: InstMap,
     };
 
-    pub fn parse(self: *Self, ts: *LinizedTokens) !pl {
-        var ip: usize = 0;
+    pub fn parse(self: *Self, ts: *LinizedTokens) !Parsed {
+        var ip: u16 = 0;
         var lm = LabelMap.init(self.alloc);
-        var program = std.ArrayList(Inst).init(self.alloc);
+        var im = InstMap.init(self.alloc);
+        var program = Program.init(self.alloc);
+
         for (ts.items) |line| {
-            var idx: usize = 0;
+            var idx: u16 = 0;
             while (idx < line.len) : (idx += 1) {
                 if (line[idx].type == .label) {
                     try program.append(Inst.new(.label, InstValue.new([]const u8, line[idx].value)));
+                    try im.put(ip, line[idx].loc);
                     try lm.put(line[idx].value, ip);
                     ip += 1;
                     continue;
@@ -102,6 +107,7 @@ pub const Parser = struct {
                 const ty = tyo.?;
                 if (!ty.arg_required()) {
                     try program.append(Inst.new(ty, inst.None));
+                    try im.put(ip, line[idx].loc);
                     ip += 1;
                     continue;
                 }
@@ -118,13 +124,15 @@ pub const Parser = struct {
                 }
 
                 try program.append(try self.parse_inst(ty, operand));
+                try im.put(ip, line[idx].loc);
                 ip += 1;
             }
         }
 
-        return pl{
+        return Parsed {
             .program = program,
-            .lm = lm
+            .lm = lm,
+            .im = im,
         };
     }
 };

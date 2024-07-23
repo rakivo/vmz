@@ -17,20 +17,20 @@ pub const LinizedTokens = std.ArrayList([]const Token);
 
 pub const Token = struct {
     type: Type,
-    info: Info,
+    loc: Loc,
     value: []const u8,
 
     const Self = @This();
 
-    pub const Info = struct { row: u32, col: u32 };
+    pub const Loc = struct { row: u32, col: u32 };
     pub const Type = enum {
         str, int, label, float, literal
     };
 
-    pub inline fn new(typ: Type, info: Info, value: []const u8) Self {
+    pub inline fn new(typ: Type, loc: Loc, value: []const u8) Self {
         return .{
             .type = typ,
-            .info = info,
+            .loc = loc,
             .value = value
         };
     }

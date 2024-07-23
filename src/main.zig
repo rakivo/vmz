@@ -25,15 +25,15 @@ pub fn main() !void {
 
     var parser = Parser.new(lexer.file_path, arena.allocator());
 
-    const pl = parser.parse(&lexer.tokens) catch exit(1);
+    const parsed = parser.parse(&lexer.tokens) catch exit(1);
 
-    const program = pl.program;
-    var lm = pl.lm;
-
+    const program = parsed.program;
     defer program.deinit();
-    defer lm.deinit();
 
-    var vm = try Vm.new(program.items, lm, arena.allocator());
+    var im = parsed.im;
+    var lm = parsed.lm;
+
+    var vm = try Vm.new(program.items, parser.file_path, &lm, &im, arena.allocator());
     defer vm.deinit();
 
     var start: i64 = 0;
