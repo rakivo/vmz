@@ -46,7 +46,7 @@ pub const NaNBox = union {
         return @bitCast(bits);
     }
 
-    inline fn getValue(self: *const Self) i64 {
+    pub inline fn getValue(self: *const Self) i64 {
         const bits: u64 = @bitCast(self.v);
         const value: i64 = @intCast(bits & VALUE_MASK);
         return if ((bits & (1 << 63)) != 0) -value else value;

@@ -1,17 +1,8 @@
 const std     = @import("std");
-const flag    = @import("flag.zig");
 const STR_CAP = @import("vm.zig").Vm.STR_CAP;
-
-const Flag = flag.Flag;
-const Parser = flag.Parser;
 
 const exit  = std.process.exit;
 const print = std.debug.print;
-
-const src_flag = Flag([]const u8, "-p", "--path", .{
-    .help = "path to src file",
-    .mandatory = true,
-}).new();
 
 pub const LinizedTokens = std.ArrayList([]const Token);
 
@@ -135,8 +126,7 @@ pub const Lexer = struct {
         return tokens;
     }
 
-    pub fn init(flag_parser: *Parser, alloc: std.mem.Allocator) !Self {
-        const file_path = flag_parser.parse(src_flag).?;
+    pub fn init(file_path: []const u8, alloc: std.mem.Allocator) !Self {
         const content = std.fs.cwd().readFileAlloc(alloc, file_path, CONTENT_CAP) catch |err| {
             print("ERROR: Failed to read file: {s}: {}\n", .{file_path, err});
             exit(1);

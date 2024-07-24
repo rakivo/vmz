@@ -90,8 +90,10 @@ pub const Parser = struct {
 
     pub fn parse(self: *const Self, flag: anytype) ?flag.type {
         const str = if (self.parse_(flag)) |str| str else {
-            std.debug.print("Mandatory `{s}` or `{s}` flag is not provided\n", .{flag.short, flag.long});
-            exit(1);
+            if (flag.mandatory) {
+                std.debug.print("Mandatory `{s}` or `{s}` flag is not provided\n", .{flag.short, flag.long});
+                exit(1);
+            } else return null;
         };
         return switch(flag.type) {
             []const u8 => @as(flag.type, str),

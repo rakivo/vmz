@@ -63,7 +63,7 @@ pub const Vm = struct {
         return switch (inst.value) {
             .U64 => |ip| ip,
             .Str => |str| if (self.lm.get(str)) |ip| ip else return self.report_err(error.UNDEFINED_SYMBOL),
-            .Nan => |nan| @intCast(nan.as(i64)),
+            .NaN => |nan| @intCast(nan.as(i64)),
             else => error.INVALID_TYPE
         };
     }
@@ -127,7 +127,7 @@ pub const Vm = struct {
             .nop => self.ip += 1,
             .push => if (self.stack.len() < STACK_CAP) {
                 try switch (inst.value) {
-                    .Nan => |nan| self.stack.pushBack(nan),
+                    .NaN => |nan| self.stack.pushBack(nan),
                     .F64 => |val| self.stack.pushBack(NaNBox.from(f64, val)),
                     .U64 => |val| self.stack.pushBack(NaNBox.from(u64, val)),
                     .I64 => |val| self.stack.pushBack(NaNBox.from(i64, val)),
