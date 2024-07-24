@@ -1,38 +1,39 @@
-const std       = @import("std");
-const flag_mod  = @import("flags.zig");
-const Loc       = @import("lexer.zig").Token.Loc;
-const Inst      = @import("inst.zig").Inst;
-const Trap      = @import("trap.zig").Trap;
-const NaNBox    = @import("NaNBox.zig").NaNBox;
-const VecDeque  = @import("VecDeque.zig").VecDeque;
-const builtin   = @import("builtin");
+const std      = @import("std");
+const builtin  = @import("builtin");
+const flag_mod = @import("flags.zig");
+const Loc      = @import("lexer.zig").Token.Loc;
+const Inst     = @import("inst.zig").Inst;
+const Trap     = @import("trap.zig").Trap;
+const Natives  = @import("natives.zig").Natives;
+const NaNBox   = @import("NaNBox.zig").NaNBox;
+const VecDeque = @import("VecDeque.zig").VecDeque;
 
-const Flag      = flag_mod.Flag;
-const Flags     = flag_mod.Flags;
+const Flag  = flag_mod.Flag;
+const Flags = flag_mod.Flags;
 
-const print     = std.debug.print;
-const exit      = std.process.exit;
-const assert    = std.debug.assert;
-const writer    = std.io.getStdOut().writer();
+const print  = std.debug.print;
+const exit   = std.process.exit;
+const assert = std.debug.assert;
+const writer = std.io.getStdOut().writer();
 
-const Allocator = std.mem.Allocator;
+pub const Program  = std.ArrayList(Inst);
+pub const LabelMap = std.StringHashMap(u32);
+pub const InstMap  = std.AutoHashMap(u32, Loc);
 
 pub const DEBUG = false;
 
-pub const Program  = std.ArrayList(Inst);
-pub const LabelMap = std.StringHashMap(u16);
-pub const InstMap  = std.AutoHashMap(u32, Loc);
-
 pub const Vm = struct {
+    ip: usize = 0,
+    halt: bool = false,
+    flags: Flags = Flags.new(),
+
     lm: *LabelMap,
     im: *InstMap,
-    file_path: []const u8,
-    halt: bool = false,
-    alloc: Allocator,
-    flags: Flags = Flags.new(),
-    stack: VecDeque(NaNBox),
+    natives: *Natives,
     program: []const Inst,
-    ip: usize = 0,
+    file_path: []const u8,
+    stack: VecDeque(NaNBox),
+    alloc: std.mem.Allocator,
 
     const Self = @This();
 
@@ -40,14 +41,15 @@ pub const Vm = struct {
     pub const STACK_CAP = 1024;
     pub const INIT_STACK_CAP = STACK_CAP / 8;
 
-    pub fn new(program: []const Inst, file_path: []const u8, lm: *LabelMap, im: *InstMap, alloc: Allocator) !Self {
+    pub fn init(program: []const Inst, file_path: []const u8, lm: *LabelMap, im: *InstMap, natives: *Natives, alloc: std.mem.Allocator) !Self {
         return .{
             .lm = lm,
             .im = im,
             .alloc = alloc,
+            .program = program,
+            .natives = natives,
             .file_path = file_path,
             .stack = try VecDeque(NaNBox).initCapacity(alloc, INIT_STACK_CAP),
-            .program = program,
         };
     }
 
@@ -72,7 +74,7 @@ pub const Vm = struct {
         return ip;
     }
 
-    fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
+    inline fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
         const flag = Flag.from_inst(inst).?;
         if (self.flags.is(flag)) {
             const ip = try self.get_ip(inst);
@@ -107,7 +109,7 @@ pub const Vm = struct {
         };
     }
 
-    inline fn report_err(self: *const Self, err: anytype) anyerror {
+    inline fn report_err(self: *const Self, err: anyerror) anyerror {
         const loc = self.im.get(@intCast(self.ip)).?;
         std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
             self.file_path,
@@ -146,7 +148,7 @@ pub const Vm = struct {
                 switch (self.stack.buf[n - 1].getType()) {
                     .Str => {
                         if (n < 1) return self.report_err(error.STACK_UNDERFLOW);
-                        const nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(self.stack.buf[n - 1].as(u8) - 1)), .Str);
+                        const nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), self.stack.buf[n - 1].as(i64) - 1), .Str);
                         self.stack.get(n - 2).?.* = .{.v = nan};
                         _ = self.stack.popBack();
                     },
@@ -256,6 +258,26 @@ pub const Vm = struct {
                 self.ip += 1;
             },
             .halt => self.halt = true,
+            .native => {
+                const name = switch (inst.value) {
+                    .Str => |str| str,
+                    else => return error.INVALID_TYPE,
+                };
+                const ptro = self.natives.get(name);
+                if (ptro) |ptr| {
+                    try ptr(self);
+                } else {
+                    if (self.natives.map.count() > 0) {
+                        var it = self.natives.map.keyIterator();
+                        print("Names of natives provided: {s}\n", .{it.next().?.*});
+                        while (it.next()) |key|
+                            print(", {s}\n", .{key.*});
+                    }
+                    return self.report_err(error.UNDEFINED_SYMBOL);
+                }
+
+                self.ip += 1;
+            },
             .label => self.ip += 1
         };
     }

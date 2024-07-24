@@ -1,2 +1,3 @@
 _start:
-    pop
+    native push_69
+    dmp

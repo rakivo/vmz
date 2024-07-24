@@ -84,7 +84,7 @@ pub const Parser = struct {
     };
 
     pub fn parse(self: *Self, ts: *LinizedTokens) !Parsed {
-        var ip: u16 = 0;
+        var ip: u32 = 0;
         var lm = LabelMap.init(self.alloc);
         var im = InstMap.init(self.alloc);
         var program = Program.init(self.alloc);

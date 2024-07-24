@@ -20,7 +20,7 @@ pub const InstType = enum {
 
     swap, dup,
 
-    cmp, dmp, nop, label, halt,
+    cmp, dmp, nop, label, native, halt,
 
     const Self = @This();
 
@@ -33,7 +33,7 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
             else => false,
         };
     }
@@ -41,6 +41,7 @@ pub const InstType = enum {
     pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
             .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
+            .native => &[_]Token.Type{.str, .literal},
             .push => &[_]Token.Type{.int, .str, .float},
             .swap => &[_]Token.Type{.int},
             .dup  => &[_]Token.Type{.int},
