@@ -23,7 +23,7 @@ pub const InstMap  = std.AutoHashMap(u32, Loc);
 pub const DEBUG = false;
 
 pub const Vm = struct {
-    ip: usize = 0,
+    ip: u64 = 0,
     halt: bool = false,
     flags: Flags = Flags.new(),
 
