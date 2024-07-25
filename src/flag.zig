@@ -64,18 +64,20 @@ pub fn Flag(comptime T: type, comptime short_: []const u8, comptime long_: []con
 }
 
 pub const Parser = struct {
-    args:  [][:0]u8,
+    args: [][:0]u8,
+    alloc: std.mem.Allocator,
 
     const Self = @This();
 
-    pub inline fn init() !Parser {
+    pub inline fn init(alloc: std.mem.Allocator) !Parser {
         return .{
-            .args  = try process.argsAlloc(heap.page_allocator)
+            .args = try process.argsAlloc(alloc),
+            .alloc = alloc,
         };
     }
 
     pub inline fn deinit(self: Self) void {
-        process.argsFree(heap.page_allocator, self.args);
+        process.argsFree(self.alloc, self.args);
     }
 
     fn parse_(self: *const Self, flag: anytype) ?[]const u8 {
