@@ -32,12 +32,18 @@ pub const Vm = struct {
     natives: *Natives,
     program: []const Inst,
     file_path: []const u8,
-    stack: VecDeque(NaNBox),
     alloc: std.mem.Allocator,
+
+    heap: []NaNBox,
+    stack: VecDeque(NaNBox),
 
     const Self = @This();
 
     pub const STR_CAP = 128;
+
+    pub const HEAP_CAP = 1024 * 1024;
+    pub const INIT_HEAP_CAP = 128;
+
     pub const STACK_CAP = 1024;
     pub const INIT_STACK_CAP = STACK_CAP / 8;
 
@@ -49,6 +55,7 @@ pub const Vm = struct {
             .program = program,
             .natives = natives,
             .file_path = file_path,
+            .heap = try alloc.alloc(NaNBox, INIT_HEAP_CAP),
             .stack = try VecDeque(NaNBox).initCapacity(alloc, INIT_STACK_CAP),
         };
     }

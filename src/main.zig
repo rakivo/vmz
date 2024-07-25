@@ -92,7 +92,7 @@ pub fn main() !void {
     var natives = Natives.init(arena.allocator());
     try natives.append("push_69", push_69);
 
-    var flag_parser = try FlagParser.init();
+    var flag_parser = try FlagParser.init(arena.allocator());
     defer flag_parser.deinit();
 
     const file_path = flag_parser.parse(src_flag).?;
