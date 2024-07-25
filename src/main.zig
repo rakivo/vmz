@@ -46,7 +46,6 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
     return if (std.mem.endsWith(u8, file_path, ".asm")) {
         var lexer = Lexer.init(file_path, alloc) catch exit(1);
         defer lexer.deinit();
-
         var parser = Parser.new(file_path, alloc);
         return parser.parse(&lexer.tokens) catch exit(1);
     } else {
@@ -94,7 +93,7 @@ pub fn main() !void {
     const file_path = flag_parser.parse(src_flag).?;
 
     var parsed = try get_program(file_path, arena.allocator());
-    parsed.deinit();
+    defer parsed.deinit();
 
     const im = parsed.im;
     const lm = parsed.lm;
