@@ -62,10 +62,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
             const inst = try Inst.from_bytes(chunk);
             if (inst.type == .label) {
                 std.debug.print("{s}\n", .{inst.value.Str});
-                try lm.put(switch (inst.value) {
-                    .Str => |str| str,
-                    else => unreachable,
-                }, ip);
+                try lm.put(inst.value.Str, ip);
             }
 
             try im.put(ip, Loc {.row = 68, .col = 68});
