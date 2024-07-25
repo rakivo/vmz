@@ -47,8 +47,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
         var lexer = Lexer.init(file_path, alloc) catch exit(1);
         defer lexer.deinit();
 
-        var parser = Parser.new(lexer.file_path, alloc);
-
+        var parser = Parser.new(file_path, alloc);
         return parser.parse(&lexer.tokens) catch exit(1);
     } else {
         var ip: u32 = 0;
@@ -58,11 +57,11 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
         var program = Program.init(alloc);
 
         const file = try std.fs.cwd().readFileAlloc(alloc, file_path, 128 * 128);
-
         while (bp < file.len) : (bp += INST_CAP) {
             const chunk = file[bp..bp + INST_CAP];
             const inst = try Inst.from_bytes(chunk);
             if (inst.type == .label) {
+                std.debug.print("{s}\n", .{inst.value.Str});
                 try lm.put(switch (inst.value) {
                     .Str => |str| str,
                     else => unreachable,
@@ -82,43 +81,51 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
     };
 }
 
-fn push_69(vm: *Vm) !void {
-    try vm.stack.pushBack(NaNBox.from(i64, 69));
-}
-
 pub fn main() !void {
+    var start: i64 = 0;
+    if (vm_mod.DEBUG) {
+        start = std.time.microTimestamp();
+    }
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
     var natives = Natives.init(arena.allocator());
-    try natives.append("push_69", push_69);
 
     var flag_parser = try FlagParser.init(arena.allocator());
     defer flag_parser.deinit();
 
     const file_path = flag_parser.parse(src_flag).?;
-    const parsed = try get_program(file_path, arena.allocator());
+
+    var parsed = try get_program(file_path, arena.allocator());
+    parsed.deinit();
+
+    const im = parsed.im;
+    const lm = parsed.lm;
     const program = parsed.program;
-    defer program.deinit();
+
+    _ = parsed.lm.keyIterator();
 
     if (flag_parser.parse(out_flag)) |file_path_| {
-        try write_program(file_path_, program.items);
+        try write_program(file_path_, parsed.program.items);
     }
-
-    var im = parsed.im;
-    var lm = parsed.lm;
 
     var vm = try Vm.init(program.items, file_path, &lm, &im, &natives, arena.allocator());
     defer vm.deinit();
 
-    var start: i64 = 0;
-    comptime if (vm_mod.DEBUG) {
-        start = std.time.microTimestamp();
-    };
+    if (vm_mod.DEBUG) {
+        const elapsed = std.time.microTimestamp() - start;
+        std.debug.print("Initting took: {d}μs\n", .{elapsed});
+    }
+
+    var executing_start: i64 = 0;
+    if (vm_mod.DEBUG) {
+        executing_start = std.time.microTimestamp();
+    }
 
     try vm.execute_program();
 
-    comptime if (vm_mod.DEBUG) {
-        const elapsed = std.time.microTimestamp() - start;
+    if (vm_mod.DEBUG) {
+        const elapsed = std.time.microTimestamp() - executing_start;
         std.debug.print("Execution of program took: {d}μs\n", .{elapsed});
-    };
+    }
 }

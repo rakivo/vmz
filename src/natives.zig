@@ -20,7 +20,7 @@ pub const Natives = struct {
         self.map.deinit();
     }
 
-    pub inline fn get(self: *Self, key: []const u8) ?REQUIRED_SIGNATURE {
+    pub inline fn get(self: *const Self, key: []const u8) ?REQUIRED_SIGNATURE {
         return self.map.get(key);
     }
 

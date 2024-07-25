@@ -15,7 +15,7 @@ pub const Token = struct {
 
     pub const Loc = struct { row: u32, col: u32 };
     pub const Type = enum {
-        str, int, label, float, literal
+        str, int, char, label, float, literal
     };
 
     pub inline fn new(typ: Type, loc: Loc, value: []const u8) Self {
@@ -36,6 +36,7 @@ pub const Lexer = struct {
     const CONTENT_CAP = 1024 * 1024;
 
     pub const Error = error {
+        INVALID_CHAR,
         NO_CLOSING_QUOTE,
         UNDEFINED_SYMBOL,
     };
@@ -98,6 +99,21 @@ pub const Lexer = struct {
                         continue;
                     }
 
+                    if (std.mem.startsWith(u8, word.str, "'")) {
+                        if (!std.mem.endsWith(u8, word.str, "'"))
+                            break :blk Error.INVALID_CHAR;
+
+                        if (word.str.len != 3)
+                            break :blk Error.INVALID_CHAR;
+
+                        const t = Token.new(.char, .{
+                            .row = row, .col = word.s
+                        }, word.str[1..2]);
+                        try line_tokens.append(t);
+                        idx += 1;
+                        continue;
+                    }
+
                     if (std.ascii.isDigit(word.str[0])) {
                         if (std.mem.indexOf(u8, word.str, ".")) |_|
                             break :blk .float
@@ -122,6 +138,12 @@ pub const Lexer = struct {
                 try line_tokens.append(t);
             }
         }
+
+        // for (tokens.items) |line| {
+        //     for (line) |t|
+        //         print("{s} ", .{t.value});
+        //     print("\n", .{});
+        // }
 
         return tokens;
     }

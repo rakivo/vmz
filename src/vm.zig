@@ -1,6 +1,7 @@
 const std      = @import("std");
 const builtin  = @import("builtin");
 const flag_mod = @import("flags.zig");
+const Heap     = @import("heap.zig").Heap;
 const Loc      = @import("lexer.zig").Token.Loc;
 const Inst     = @import("inst.zig").Inst;
 const Trap     = @import("trap.zig").Trap;
@@ -17,37 +18,42 @@ const assert = std.debug.assert;
 const writer = std.io.getStdOut().writer();
 
 pub const Program  = std.ArrayList(Inst);
-pub const LabelMap = std.StringHashMap(u32);
-pub const InstMap  = std.AutoHashMap(u32, Loc);
+pub const LabelMap = std.StringHashMap(u64);
+pub const InstMap  = std.AutoHashMap(u64, Loc);
 
 pub const DEBUG = false;
 
 pub const Vm = struct {
     ip: u64 = 0,
+    hp: u64 = 128,
     halt: bool = false,
     flags: Flags = Flags.new(),
 
-    lm: *LabelMap,
-    im: *InstMap,
-    natives: *Natives,
+    lm: *const LabelMap,
+    im: *const InstMap,
+    natives: *const Natives,
     program: []const Inst,
     file_path: []const u8,
     alloc: std.mem.Allocator,
 
-    heap: []NaNBox,
+    heap: Heap,
     stack: VecDeque(NaNBox),
 
     const Self = @This();
 
     pub const STR_CAP = 128;
 
-    pub const HEAP_CAP = 1024 * 1024;
-    pub const INIT_HEAP_CAP = 128;
-
     pub const STACK_CAP = 1024;
     pub const INIT_STACK_CAP = STACK_CAP / 8;
 
-    pub fn init(program: []const Inst, file_path: []const u8, lm: *LabelMap, im: *InstMap, natives: *Natives, alloc: std.mem.Allocator) !Self {
+    pub fn init(program: []const Inst,
+                file_path: []const u8,
+                lm: *const LabelMap,
+                im: *const InstMap,
+                natives: *const Natives,
+                alloc: std.mem.Allocator)
+        !Self
+    {
         return .{
             .lm = lm,
             .im = im,
@@ -55,14 +61,13 @@ pub const Vm = struct {
             .program = program,
             .natives = natives,
             .file_path = file_path,
-            .heap = try alloc.alloc(NaNBox, INIT_HEAP_CAP),
+            .heap = try Heap.init(alloc),
             .stack = try VecDeque(NaNBox).initCapacity(alloc, INIT_STACK_CAP),
         };
     }
 
     pub inline fn deinit(self: *Self) void {
-        self.lm.deinit();
-        self.im.deinit();
+        self.heap.deinit();
         self.stack.deinit();
     }
 
@@ -112,7 +117,7 @@ pub const Vm = struct {
             .I64 => self.math_op(i64, a.as(i64), b.as(i64), b, op),
             .U64 => self.math_op(u64, a.as(u64), b.as(u64), b, op),
             .F64 => self.math_op(f64, a.as(f64), b.as(f64), b, op),
-            else => return self.report_err(error.INVALID_TYPE),
+            else => self.report_err(error.INVALID_TYPE),
         };
     }
 
@@ -129,11 +134,38 @@ pub const Vm = struct {
         } else exit(1);
     }
 
+    inline fn get_uint(inst: *const Inst) !u64 {
+        return switch (inst.value) {
+            .NaN => |nan| return switch (nan.getType()) {
+                .U64 => nan.as(u64),
+                .I64 => @intCast(nan.as(i64)),
+                else => error.INVALID_TYPE,
+            },
+            .U64 => |int| int,
+            else => error.INVALID_TYPE,
+        };
+    }
+
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
         return switch (inst.type) {
             .nop => self.ip += 1,
+            .alloc => if (self.hp < Heap.CAP) {
+                var len = try get_uint(inst);
+                if (len > self.hp) {
+                    while (len > 0) {
+                        const cap_inc = (self.heap.cap * 2 - self.heap.cap);
+                        if (cap_inc > len) {
+                            break;
+                        } else len -= cap_inc;
+                        self.hp += cap_inc;
+                        try self.heap.grow();
+                    }
+                }
+                self.ip += 1;
+            } else return error.FAILED_TO_GROW,
             .push => if (self.stack.len() < STACK_CAP) {
                 try switch (inst.value) {
+                    .U8  => |chr| self.stack.pushBack(NaNBox.from(u8, chr)),
                     .NaN => |nan| self.stack.pushBack(nan),
                     .F64 => |val| self.stack.pushBack(NaNBox.from(f64, val)),
                     .U64 => |val| self.stack.pushBack(NaNBox.from(u64, val)),
@@ -146,7 +178,7 @@ pub const Vm = struct {
                         try self.stack.appendSlice(nans[0..str.len]);
                         try self.stack.pushBack(NaNBox.from([]const u8, str));
                     },
-                    else => return self.report_err(error.INVALID_TYPE),
+                    else => self.report_err(error.INVALID_TYPE),
                 };
                 self.ip += 1;
             } else return self.report_err(error.STACK_OVERFLOW),
@@ -163,27 +195,27 @@ pub const Vm = struct {
                 }
                 self.ip += 1;
             } else return self.report_err(error.STACK_UNDERFLOW),
-            .swap => switch (inst.value) {
+            .swap => return switch (inst.value) {
                 .U64 => |idx_| if (self.stack.len() > idx_) {
                     const len = self.stack.len();
                     const idx = len - idx_ - 1;
                     self.stack.swap(idx, len - 1);
                     self.ip += 1;
-                } else return self.report_err(error.STACK_UNDERFLOW),
-                else => return self.report_err(error.INVALID_TYPE)
+                } else self.report_err(error.STACK_UNDERFLOW),
+                else => self.report_err(error.INVALID_TYPE)
             },
-            .dup => switch (inst.value) {
+            .dup => return switch (inst.value) {
                 .U64 => |idx_| if (self.stack.len() > idx_) {
                     const idx = self.stack.len() - idx_ - 1;
                     const nth = self.stack.get(idx).?.*;
                     try self.stack.pushBack(nth);
                     self.ip += 1;
-                } else return self.report_err(error.STACK_UNDERFLOW),
-                else => return self.report_err(error.INVALID_TYPE)
+                } else self.report_err(error.STACK_UNDERFLOW),
+                else => self.report_err(error.INVALID_TYPE)
             },
             .inc => if (self.stack.len() > 0) {
                 const nan = self.stack.back().?;
-                nan.* =  switch (nan.getType()) {
+                nan.* = switch (nan.getType()) {
                     .U64 => NaNBox.from(u64, nan.as(u64) + 1),
                     .I64 => NaNBox.from(i64, nan.as(i64) + 1),
                     .F64 => NaNBox.from(f64, nan.as(f64) + 1.0),
@@ -193,7 +225,7 @@ pub const Vm = struct {
             },
             .dec => if (self.stack.len() > 0) {
                 const nan = self.stack.back().?;
-                nan.* =  switch (nan.getType()) {
+                nan.* = switch (nan.getType()) {
                     .U64 => NaNBox.from(u64, nan.as(u64) - 1),
                     .I64 => NaNBox.from(i64, nan.as(i64) - 1),
                     .F64 => NaNBox.from(f64, nan.as(f64) - 1.0),
@@ -210,7 +242,13 @@ pub const Vm = struct {
 
             .dmp => if (self.stack.back()) |v| {
                 switch (v.getType()) {
-                    .I64, .U64, .F64, .U8 => {
+                    .U8 => {
+                        _ = writer.write(&[_]u8 {v.as(u8), 10}) catch |err| {
+                            std.log.err("Failed to write to stdout: {}", .{err});
+                            exit(1);
+                        };
+                    },
+                    .I64, .U64, .F64 => {
                         var buf: [32]u8 = undefined;
                         const ret = try std.fmt.bufPrint(&buf, "{}\n", .{v});
                         _ = writer.write(ret) catch |err| {

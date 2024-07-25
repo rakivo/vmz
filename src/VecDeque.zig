@@ -158,21 +158,13 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try writer.writeAll("VecDeque(");
-            try std.fmt.format(writer, "{}", .{T});
-            try writer.writeAll(") { .buf = [");
+            try writer.writeAll("[");
 
             var it = self.iterator();
             if (it.next()) |val| try writer.print("{any}", .{val});
             while (it.next()) |val| try writer.print(", {any}", .{val});
 
-            try writer.writeAll("], .head = ");
-            try std.fmt.format(writer, "{}", .{self.head});
-            try writer.writeAll(", .tail = ");
-            try std.fmt.format(writer, "{}", .{self.tail});
-            try writer.writeAll(", .len = ");
-            try std.fmt.format(writer, "{}", .{self.len()});
-            try writer.writeAll(" }");
+            try writer.writeAll("]");
         }
 
         pub const Iterator = struct {

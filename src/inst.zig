@@ -24,7 +24,7 @@ pub const InstType = enum {
 
     swap, dup,
 
-    cmp, dmp, nop, label, native, halt,
+    cmp, dmp, nop, label, native, alloc, halt,
 
     const Self = @This();
 
@@ -42,7 +42,7 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
             else => false,
         };
     }
@@ -51,9 +51,8 @@ pub const InstType = enum {
         return switch (self) {
             .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
             .native => &[_]Token.Type{.str, .literal},
-            .push => &[_]Token.Type{.int, .str, .float},
-            .swap => &[_]Token.Type{.int},
-            .dup  => &[_]Token.Type{.int},
+            .push => &[_]Token.Type{.int, .str, .char, .float},
+            .alloc, .swap, .dup => &[_]Token.Type{.int},
             else  => &[_]Token.Type{},
         };
     }
@@ -67,11 +66,12 @@ const InstValueType = enum {
 };
 
 pub const InstValue = union(enum) {
-    NaN: NaNBox,
-    None: void,
+    U8: u8,
     I64: i64,
     U64: u64,
     F64: f64,
+    None: void,
+    NaN: NaNBox,
     Str: []const u8,
 
     const Self = @This();
@@ -166,6 +166,7 @@ pub const InstValue = union(enum) {
 
     pub inline fn new(comptime T: type, v: T) Self {
         return switch (T) {
+            u8         => .{ .U8 = v },
             i64        => .{ .I64 = v },
             f64        => .{ .F64 = v },
             u64        => .{ .U64 = v },

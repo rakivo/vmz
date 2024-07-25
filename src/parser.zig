@@ -40,6 +40,7 @@ pub const Parser = struct {
     fn parse_inst(self: *Self, ty: InstType, operand_str: Token) !Inst {
         switch (operand_str.type) {
             .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.value)),
+            .char => return Inst.new(ty, InstValue.new(u8, operand_str.value[0])),
             .int => {
                 const int = std.fmt.parseInt(i64, operand_str.value, 10) catch |err| {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
@@ -70,17 +71,23 @@ pub const Parser = struct {
         }
     }
 
-    pub fn new(file_path: []const u8, alloc_: std.mem.Allocator) Self {
+    pub fn new(file_path: []const u8, alloc: std.mem.Allocator) Self {
         return .{
             .file_path = file_path,
-            .alloc = alloc_,
+            .alloc = alloc,
         };
     }
 
     pub const Parsed = struct {
-        program: Program,
-        lm: LabelMap,
         im: InstMap,
+        lm: LabelMap,
+        program: Program,
+
+        pub inline fn deinit(parsed: *Parsed) void {
+            parsed.lm.deinit();
+            parsed.im.deinit();
+            parsed.program.deinit();
+        }
     };
 
     pub fn parse(self: *Self, ts: *LinizedTokens) !Parsed {
