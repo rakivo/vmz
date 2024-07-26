@@ -198,21 +198,23 @@ pub const Vm = struct {
             } else return error.STACK_OVERFLOW,
             .spush => if (self.stack.len() < STACK_CAP) {
                 try switch (inst.value) {
-                    .U8  => |chr| {
+                    .U8 => |chr| {
                         _ = blk: {
                             if (self.stack.back()) |back| {
-                                if (back.getType() != .Str) break :blk;
+                                if (back.getType() == .U8) {
+                                    const str = &[_]u8 {back.as(u8), chr};
+                                    try self.stack.pushBack(NaNBox.from(u8, chr));
+                                    try self.stack.pushBack(NaNBox.from([]const u8, str));
+                                    self.ip += 1;
+                                    return;
+                                } else if (back.getType() != .Str) break :blk;
                                 const new_str_len = back.as(u64) + 1;
                                 back.* = NaNBox.from(u8, chr);
                                 const new_str_len_nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(new_str_len)), .Str);
-                                try self.stack.pushBack(NaNBox {. v = new_str_len_nan});
-                            }
-
-                            self.ip += 1;
-                            return;
+                                try self.stack.pushBack(NaNBox {.v = new_str_len_nan});
+                            } else break :blk;
                         };
                         try self.stack.pushBack(NaNBox.from(u8, chr));
-                        self.ip += 1;
                     },
                     .NaN => |nan| self.stack.pushBack(nan),
                     .F64 => |val| self.stack.pushBack(NaNBox.from(f64, val)),
@@ -396,6 +398,7 @@ pub const Vm = struct {
     pub fn execute_program(self: *Self) !void {
         while (!self.halt and self.ip < self.program.len) {
             const inst = self.program[self.ip];
+            if (DEBUG) print("{}: {}\n", .{self.stack, inst});
             self.execute_instruction(&inst) catch |err| {
                 return self.report_err(err);
             };

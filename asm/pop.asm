@@ -1,11 +1,5 @@
 _start:
-    push "kostyan"
-    dmp
-    pop
-    dmp
-    spush "nchi"
-    spush 'k'
-    dmp
-    spop
     push 'a'
+    pop
+    spush 'b'
     dmp
