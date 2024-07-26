@@ -1,8 +1,10 @@
 *.o
+*.py
 *.bin
 *.java
 FlameGraph
 
+vm
 main
 build
 zig-cache

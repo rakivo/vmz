@@ -21,30 +21,31 @@ pub const Parser = struct {
     const Self = @This();
 
     pub const Error = error {
-        FAILED_TO_PARSE,
-        UNDEFINED_SYMBOL,
         NO_OPERAND,
         INVALID_TYPE,
+        NO_ENTRY_POINT,
+        FAILED_TO_PARSE,
+        UNDEFINED_SYMBOL,
     };
 
-    inline fn log_err(self: *const Self, err: Error, t: *const Token) Error {
+    pub inline fn report_err(loc: Loc, err: anyerror) anyerror {
         std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
-            self.file_path,
-            t.loc.row + 1,
-            t.loc.col + 1,
+            loc.file_path,
+            loc.row + 1,
+            loc.col + 1,
             err,
         });
         return err;
     }
 
-    fn parse_inst(self: *Self, ty: InstType, operand_str: Token) !Inst {
+    fn parse_inst(_: *Self, ty: InstType, operand_str: Token) !Inst {
         switch (operand_str.type) {
             .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.value)),
             .char => return Inst.new(ty, InstValue.new(u8, operand_str.value[0])),
             .int => {
                 const int = std.fmt.parseInt(i64, operand_str.value, 10) catch |err| {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
-                    return self.log_err(Error.FAILED_TO_PARSE, &operand_str);
+                    return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
                 };
                 if (int >= 0) {
                     if (ty == .push) {
@@ -61,7 +62,7 @@ pub const Parser = struct {
             .float => {
                 const float = std.fmt.parseFloat(f64, operand_str.value) catch |err| {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
-                    return self.log_err(Error.FAILED_TO_PARSE, &operand_str);
+                    return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
                 };
                 if (ty == .push) {
                     return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(f64, float)));
@@ -79,6 +80,7 @@ pub const Parser = struct {
     }
 
     pub const Parsed = struct {
+        ip: u64,
         im: InstMap,
         lm: LabelMap,
         program: Program,
@@ -92,6 +94,7 @@ pub const Parser = struct {
 
     pub fn parse(self: *Self, ts: *LinizedTokens) !Parsed {
         var ip: u32 = 0;
+        var entry_point: ?u64 = null;
         var lm = LabelMap.init(self.alloc);
         var im = InstMap.init(self.alloc);
         var program = Program.init(self.alloc);
@@ -100,6 +103,9 @@ pub const Parser = struct {
             var idx: u16 = 0;
             while (idx < line.len) : (idx += 1) {
                 if (line[idx].type == .label) {
+                    if (std.mem.eql(u8, line[idx].value, "_start"))
+                        entry_point = ip;
+
                     try program.append(Inst.new(.label, InstValue.new([]const u8, line[idx].value)));
                     try im.put(ip, line[idx].loc);
                     try lm.put(line[idx].value, ip);
@@ -109,7 +115,7 @@ pub const Parser = struct {
 
                 const tyo = InstType.try_from_str(line[idx].value);
                 if (tyo == null)
-                    return self.log_err(Error.UNDEFINED_SYMBOL, &line[idx]);
+                    return report_err(line[idx].loc, Error.UNDEFINED_SYMBOL);
 
                 const ty = tyo.?;
                 if (!ty.arg_required()) {
@@ -119,7 +125,7 @@ pub const Parser = struct {
                     continue;
                 }
 
-                if (idx + 1 > line.len) return self.log_err(Error.NO_OPERAND, &line[idx]);
+                if (idx + 1 > line.len) return report_err(line[idx].loc, Error.NO_OPERAND);
                 idx += 1;
 
                 const operand = line[idx];
@@ -127,7 +133,7 @@ pub const Parser = struct {
                                     ty.expected_types(),
                                     &[_]Token.Type{operand.type}) == null)
                 {
-                    return self.log_err(Error.INVALID_TYPE, &operand);
+                    return report_err(operand.loc, Error.INVALID_TYPE);
                 }
 
                 try program.append(try self.parse_inst(ty, operand));
@@ -137,9 +143,12 @@ pub const Parser = struct {
         }
 
         return Parsed {
-            .program = program,
+            .ip = if (entry_point) |e| e else {
+                return report_err(Loc.new(68, 68, self.file_path), Error.NO_ENTRY_POINT);
+            },
             .lm = lm,
             .im = im,
+            .program = program,
         };
     }
 };

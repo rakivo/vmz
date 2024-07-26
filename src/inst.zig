@@ -12,7 +12,7 @@ const exit  = std.process.exit;
 
 // Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
-    push, pop,
+    push, spush, pop, spop,
 
     fadd, fdiv, fsub, fmul,
 
@@ -24,7 +24,7 @@ pub const InstType = enum {
 
     swap, dup,
 
-    cmp, dmp, nop, label, native, alloc, halt,
+    ret, cmp, dmp, nop, label, native, alloc, call, halt,
 
     const Self = @This();
 
@@ -42,7 +42,7 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
             else => false,
         };
     }
@@ -50,7 +50,8 @@ pub const InstType = enum {
     pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
             .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
-            .native => &[_]Token.Type{.str, .literal},
+            .call, .native => &[_]Token.Type{.str, .literal},
+            .spush => &[_]Token.Type{.int, .str, .char},
             .push => &[_]Token.Type{.int, .str, .char, .float},
             .alloc, .swap, .dup => &[_]Token.Type{.int},
             else  => &[_]Token.Type{},
