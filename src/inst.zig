@@ -12,10 +12,18 @@ const exit  = std.process.exit;
 
 // Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
-    push, spush, pop, spop,
+    // push/pop to stack
+    push,
+    pop,
 
+    // push/pop to strings
+    spush,
+    spop,
+
+    // float math
     fadd, fdiv, fsub, fmul,
 
+    // int math
     iadd, idiv, isub, imul,
 
     inc, dec,
@@ -24,7 +32,43 @@ pub const InstType = enum {
 
     swap, dup,
 
-    ret, cmp, dmp, nop, label, native, alloc, call, halt,
+    // read content from file descriptor (stdin/stdout/stderr, from file)
+    fread
+
+    // exact read (read exact index from memory)
+    eread,
+
+    // read region of memory and push in onto the stack
+    read,
+
+    // push memory pointer onto the stack (basically just amount of used memory)
+    pushmp,
+
+    // push stack length onto the stack
+    pushsp,
+
+    call,
+    ret,
+
+    cmp,
+
+    // print last element on the stack to the stdout
+    dmp,
+
+    // added just for consistency, use `<your_label>:` syntax
+    label,
+
+    // allocate memory on the heap.
+    alloc,
+
+    // call a native function from provided native functions map
+    native,
+
+    // no operation
+    nop,
+
+    // halt the vm
+    halt,
 
     const Self = @This();
 
@@ -42,7 +86,7 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .swap, .dup => true,
+            .swap, .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,
             else => false,
         };
     }
@@ -63,7 +107,7 @@ pub const INST_CAP = 14 + 1 + 1;
 pub const None = InstValue.new(void, {});
 
 const InstValueType = enum {
-    NaN, None, I64, U64, F64, Str,
+    U8, I64, U64, F64, None, NaN, Str,
 };
 
 pub const InstValue = union(enum) {
@@ -135,7 +179,6 @@ pub const InstValue = union(enum) {
         idx += 1;
         const vty: InstValueType = @enumFromInt(bytes[idx]);
         idx += 1;
-
         return switch (vty) {
             .NaN => {
                 const f: f64 = @bitCast(g8b(bytes[idx..idx + 8]));

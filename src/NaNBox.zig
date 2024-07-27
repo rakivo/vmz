@@ -1,11 +1,11 @@
 const std = @import("std");
 
 pub const Type = enum(u8) {
+    U8,
     I64,
     U64,
     F64,
     Str,
-    U8
 };
 
 pub const NaNBox = union {

@@ -39,8 +39,11 @@ pub const Flags = packed struct {
             self.set(Flag.NE);
             if (a > b) {
                 self.set(Flag.G);
-            } else if (a < b)
+                self.set(Flag.GE);
+            } else if (a < b) {
                 self.set(Flag.L);
+                self.set(Flag.LE);
+            }
         }
     }
 

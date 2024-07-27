@@ -41,7 +41,8 @@ pub const Lexer = struct {
     tokens: std.ArrayList([]const Token),
 
     const Self = @This();
-    const CONTENT_CAP = 1024 * 1024;
+
+    pub const CONTENT_CAP = 1024 * 1024;
 
     pub const Error = error {
         INVALID_CHAR,
@@ -147,6 +148,21 @@ pub const Lexer = struct {
                         continue;
                     }
 
+                    if (std.mem.startsWith(u8, word.str, "-")) {
+                        if (word.str.len < 2)
+                            return error.UNEXPECTED_EOF;
+
+                        if (!std.ascii.isDigit(word.str[1]))
+                            return error.INVALID_LITERAL;
+
+                        if (std.mem.indexOf(u8, word.str[1..word.str.len], ".")) |_| {
+                            break :blk .float;
+                        } else
+                            break :blk .int;
+
+                        continue;
+                    }
+
                     if (std.ascii.isDigit(word.str[0])) {
                         if (std.mem.indexOf(u8, word.str, ".")) |_|
                             break :blk .float
@@ -173,7 +189,7 @@ pub const Lexer = struct {
         return tokens;
     }
 
-    inline fn read_file(file_path: []const u8, alloc: std.mem.Allocator) ![]const u8 {
+    pub inline fn read_file(file_path: []const u8, alloc: std.mem.Allocator) ![]const u8 {
         return std.fs.cwd().readFileAlloc(alloc, file_path, CONTENT_CAP) catch |err| {
             print("ERROR: Failed to read file: {s}: {}\n", .{file_path, err});
             exit(1);
