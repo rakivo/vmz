@@ -168,17 +168,6 @@ pub const Vm = struct {
         return if (get_int(inst)) |some| @intCast(some) else null;
     }
 
-    inline fn get_str(self: *Self, len: u64) []u8 {
-        const stack_len = self.stack.len();
-        const nans = self.stack.buf[stack_len - 1 - len..stack_len];
-        var str: [STR_CAP]u8 = undefined;
-        var i: usize = 0;
-        while (i < nans.len) : (i += 1)
-            str[i] = nans[i].as(u8);
-
-        return str[0..i - 1];
-    }
-
     fn print_value(self: *Self, v: *const NaNBox, newline: bool) !void {
         switch (v.getType()) {
             .U8 => {
@@ -359,11 +348,15 @@ pub const Vm = struct {
                     },
                     .Str => {
                         const len = nan.as(u64);
-                        const file_path = self.get_str(len);
+                        const nans = self.stack.buf[stack_len - len - 1 - 2..stack_len - 1 - 2];
+                        var str: [STR_CAP]u8 = undefined;
+                        var i: usize = 0;
+                        while (i < nans.len) : (i += 1)
+                            str[i] = nans[i].as(u8);
 
-                        const start = self.stack.buf[stack_len - 1 - 1 - len].as(u64);
-                        const end = self.stack.buf[stack_len - 0 - 1 - len].as(u64);
-
+                        const file_path = str[0..i];
+                        const start = self.stack.buf[stack_len - 1 - 1].as(u64);
+                        const end = self.stack.buf[stack_len - 0 - 1].as(u64);
                         if (start >= self.mp or end >= self.mp or start == end)
                             return error.ILLEGAL_MEMORY_ACCESS;
 
@@ -380,7 +373,7 @@ pub const Vm = struct {
                 };
             } else error.STACK_UNDERFLOW,
             .fread => return if (self.stack.len() > 0) {
-                const nan = self.stack.popBack().?;
+                const nan = self.stack.back().?;
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
                         const buf = try switch (nan.as(u64)) {
@@ -399,7 +392,7 @@ pub const Vm = struct {
                     .Str => {
                         const len = nan.as(u64);
                         const stack_len = self.stack.len();
-                        const nans = self.stack.buf[stack_len - len..stack_len];
+                        const nans = self.stack.buf[stack_len - len - 1..stack_len];
                         var str: [STR_CAP]u8 = undefined;
                         for (nans, 0..) |nan_, i|
                             str[i] = nan_.as(u8);
