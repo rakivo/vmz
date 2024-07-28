@@ -34,7 +34,7 @@ pub const Heap = struct {
     }
 
     pub fn shrink(self: *Self) !void {
-        if (self.alloc.resize(self.buf, self.cap / 2))
+        if (!self.alloc.resize(self.buf, self.cap / 2))
             return error.FAILED_TO_RESIZE;
 
         self.cap /= 2;
