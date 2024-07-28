@@ -6,7 +6,7 @@ const print = std.debug.print;
 
 pub const Heap = struct {
     cap: usize,
-    buf: []NaNBox,
+    buf: []u8,
     alloc: std.mem.Allocator,
 
     pub const CAP = 1024 * 1024;
@@ -16,7 +16,7 @@ pub const Heap = struct {
 
     pub inline fn init(alloc: std.mem.Allocator) !Self {
         return .{
-            .buf = try alloc.alloc(NaNBox, INIT_CAP),
+            .buf = try alloc.alloc(u8, INIT_CAP),
             .cap = INIT_CAP,
             .alloc = alloc,
         };
@@ -30,8 +30,7 @@ pub const Heap = struct {
         if (self.cap < CAP) {
             self.buf = try self.alloc.realloc(self.buf, self.cap * 2);
             self.cap *= 2;
-        } else
-            return error.FAILED_TO_GROW;
+        } else return error.FAILED_TO_GROW;
     }
 
     pub fn shrink(self: *Self) !void {

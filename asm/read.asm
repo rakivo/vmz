@@ -1,17 +1,5 @@
-print_file:
-    fread
-    push 0
-.loop:
-    eread
-    dmp
-    pop
-    pushmp
-    dec
-    cmp
-    inc
-    jl .loop
-    ret
+#"std.asm"
 
 _start:
-    push "src/lexer.zig"
+    push "src/flag.zig"
     call print_file

@@ -128,6 +128,9 @@ pub const Parser = struct {
                 if (idx + 1 > line.len) return report_err(line[idx].loc, Error.NO_OPERAND);
                 idx += 1;
 
+                if (idx >= line.len)
+                    return report_err(line[idx - 1].loc, Error.NO_OPERAND);
+
                 const operand = line[idx];
                 if (std.mem.indexOf(Token.Type,
                                     ty.expected_types(),

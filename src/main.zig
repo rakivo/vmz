@@ -33,6 +33,10 @@ const src_flag = Flag([]const u8, "-p", "--path", .{
     .mandatory = true,
 }).new();
 
+const include_flag = Flag([]const u8, "-I", "--include", .{
+    .help = "include path",
+}).new();
+
 fn write_program(file_path: []const u8, program: []const Inst) !void {
     const file = try std.fs.cwd().createFile(file_path, .{});
     defer file.close();
@@ -41,9 +45,9 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
     }
 }
 
-fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
+fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *FlagParser) !Parser.Parsed {
     return if (std.mem.endsWith(u8, file_path, ".asm")) {
-        var lexer = Lexer.init(file_path, alloc) catch exit(1);
+        var lexer = Lexer.init(file_path, alloc, flag_parser.parse(include_flag)) catch exit(1);
         defer lexer.deinit();
 
         var parser = Parser.new(file_path, alloc);
@@ -85,7 +89,6 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator) !Parser.Parsed {
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-
     var natives = Natives.init(arena.allocator());
 
     var flag_parser = try FlagParser.init(arena.allocator());
@@ -93,7 +96,7 @@ pub fn main() !void {
 
     const file_path = flag_parser.parse(src_flag).?;
 
-    var parsed = try get_program(file_path, arena.allocator());
+    var parsed = try get_program(file_path, arena.allocator(), &flag_parser);
     defer parsed.deinit();
 
     if (flag_parser.parse(out_flag)) |file_path_| {

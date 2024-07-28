@@ -25,4 +25,4 @@ _start:
     jne .loop
     pop
     pop
-    dmp
+    dmpln

@@ -1,4 +1,5 @@
 const std     = @import("std");
+const builtin = @import("builtin");
 const STR_CAP = @import("vm.zig").Vm.STR_CAP;
 
 const exit  = std.process.exit;
@@ -37,6 +38,8 @@ pub const Token = struct {
 
 pub const Lexer = struct {
     file_path: []const u8,
+    include_path: ?[]const u8,
+
     alloc: std.mem.Allocator,
     tokens: std.ArrayList([]const Token),
 
@@ -61,7 +64,32 @@ pub const Lexer = struct {
         return err;
     }
 
-    fn lex_file(file_path: []const u8, content: []const u8, alloc: std.mem.Allocator) !LinizedTokens {
+    fn _get_include_content(file_path: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) !struct {[]const u8, []const u8} {
+        return .{
+            std.fs.cwd().readFileAlloc(alloc, file_path, CONTENT_CAP) catch |err| {
+                if (include_path) |path| {
+                    // format these constants out of here.
+                    const PATH_CAP = 128;
+                    const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
+
+                    var path_buf_: [PATH_CAP]u8 = undefined;
+                    const path_buf = try std.fmt.bufPrint(&path_buf_, "{s}{c}{s}", .{path, DELIM, file_path});
+                    if (path_buf.len >= PATH_CAP)
+                        return error.PATH_IS_TOO_LONG;
+
+                    return .{
+                        try read_file(path_buf, alloc),
+                        path_buf
+                    };
+                } else {
+                    print("ERROR: Failed to read file: {s}: {}\n", .{file_path, err});
+                    exit(1);
+                }
+            }, include_path.?
+        };
+    }
+
+    fn lex_file(file_path: []const u8, content: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) !LinizedTokens {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
         var tokens = std.ArrayList([]const Token).init(alloc);
@@ -77,13 +105,15 @@ pub const Lexer = struct {
                 if (line.len < 2)
                     return report_err(Token.Loc.new(row, 0, file_path), Error.UNEXPECTED_EOF);
 
+                // TODO: clean this out.
                 if (line[1] == '"') {
                     if (!std.mem.endsWith(u8, line, "\""))
                         return report_err(Token.Loc.new(row, @intCast(line.len), file_path), Error.NO_CLOSING_QUOTE);
 
-                    const include_file_path = line[2..line.len - 1];
-                    const include_content = try read_file(include_file_path, alloc);
-                    const include_tokens = try lex_file(include_file_path, include_content, alloc);
+                    const ret = try _get_include_content(line[2..line.len - 1], alloc, include_path);
+                    const include_content = @field(ret, "0");
+                    const full_include_path = @field(ret, "1");
+                    const include_tokens = try lex_file(full_include_path, include_content, alloc, include_path);
                     for (include_tokens.items) |l|
                         try tokens.append(l);
                 }
@@ -180,12 +210,6 @@ pub const Lexer = struct {
             }
         }
 
-        // for (tokens.items) |line| {
-        //     for (line) |t|
-        //         print("{s} ", .{t.value});
-        //     print("\n", .{});
-        // }
-
         return tokens;
     }
 
@@ -196,12 +220,13 @@ pub const Lexer = struct {
         };
     }
 
-    pub fn init(file_path: []const u8, alloc: std.mem.Allocator) !Self {
+    pub fn init(file_path: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) !Self {
         const content = try read_file(file_path, alloc);
         return .{
             .alloc = alloc,
             .file_path = file_path,
-            .tokens = try lex_file(file_path, content, alloc)
+            .include_path = include_path,
+            .tokens = try lex_file(file_path, content, alloc, include_path)
         };
     }
 

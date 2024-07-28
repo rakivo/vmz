@@ -2,6 +2,8 @@
 *.py
 *.bin
 *.java
+*.data
+readme.md
 FlameGraph
 
 vmz

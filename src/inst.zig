@@ -38,8 +38,14 @@ pub const InstType = enum {
     // exact read (read exact index from memory)
     eread,
 
-    // read region of memory and push in onto the stack
+    // read a region of memory and push in onto the stack
     read,
+
+    // write a region of memory to file descriptor (stdin/stdout/stderr, to file)
+    fwrite,
+
+    // exact write (write exact index of memory)
+    write,
 
     // push memory pointer onto the stack (basically just amount of used memory)
     pushmp,
@@ -54,6 +60,9 @@ pub const InstType = enum {
 
     // print last element on the stack to the stdout
     dmp,
+
+    // print last element + newline on the stack to the stdout
+    dmpln,
 
     // added just for consistency, use `<your_label>:` syntax
     label,
