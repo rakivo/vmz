@@ -4,8 +4,9 @@
 *.java
 FlameGraph
 
-vm
+vmz
 main
 build
-zig-cache
 zig-out
+zig-cache
+.zig-cache

@@ -33,7 +33,7 @@ pub const InstType = enum {
     swap, dup,
 
     // read content from file descriptor (stdin/stdout/stderr, from file)
-    fread
+    fread,
 
     // exact read (read exact index from memory)
     eread,

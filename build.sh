@@ -1,13 +1,15 @@
 #!/bin/bash
 
 CACHE_DIR=build
+DEFAULT_NAME="vmz"
+DEFAULT_FLAGS="-O ReleaseFast"
 
 if [[ -n "$RELEASE" ]]; then
-    FLAGS="-O ReleaseFast"
+    FLAGS=$DEFAULT_FLAGS
 fi
 
 if [[ -z "$NAME" ]]; then
-    NAME="vm"
+    NAME=$DEFAULT_NAME
 fi
 
 set -xe
