@@ -39,10 +39,6 @@ pub fn Flag(comptime T: type, comptime short_: []const u8, comptime long_: []con
 
         const Self = @This();
 
-        inline fn format_flag() []const u8 {
-            comptime return "Short flag: " ++ short_ ++ "\nLong flag: " ++ long_;
-        }
-
         pub inline fn new() Self {
             var help: ?[]const u8 = null;
             var default: ?T       = null;

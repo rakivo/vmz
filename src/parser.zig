@@ -4,14 +4,17 @@ const vm     = @import("vm.zig");
 const lexer  = @import("lexer.zig");
 const NaNBox = @import("NaNBox.zig").NaNBox;
 
-const Inst          = inst.Inst;
 const LabelMap      = vm.LabelMap;
 const InstMap       = vm.InstMap;
 const Program       = vm.Program;
-const Loc           = lexer.Token.Loc;
+
+const Inst          = inst.Inst;
 const InstType      = inst.InstType;
 const InstValue     = inst.InstValue;
+
+const Loc           = lexer.Token.Loc;
 const Token         = lexer.Token;
+const MacroMap      = lexer.MacroMap;
 const LinizedTokens = lexer.LinizedTokens;
 
 pub const Parser = struct {
@@ -40,11 +43,11 @@ pub const Parser = struct {
 
     fn parse_inst(_: *Self, ty: InstType, operand_str: Token) !Inst {
         switch (operand_str.type) {
-            .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.value)),
-            .char => return Inst.new(ty, InstValue.new(u8, operand_str.value[0])),
+            .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.str)),
+            .char => return Inst.new(ty, InstValue.new(u8, operand_str.str[0])),
             .int => {
-                const int = std.fmt.parseInt(i64, operand_str.value, 10) catch |err| {
-                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
+                const int = std.fmt.parseInt(i64, operand_str.str, 10) catch |err| {
+                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
                     return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
                 };
                 if (int >= 0) {
@@ -60,8 +63,8 @@ pub const Parser = struct {
                 }
             },
             .float => {
-                const float = std.fmt.parseFloat(f64, operand_str.value) catch |err| {
-                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.value, err});
+                const float = std.fmt.parseFloat(f64, operand_str.str) catch |err| {
+                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
                     return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
                 };
                 if (ty == .push) {
@@ -103,17 +106,17 @@ pub const Parser = struct {
             var idx: u16 = 0;
             while (idx < line.len) : (idx += 1) {
                 if (line[idx].type == .label) {
-                    if (std.mem.eql(u8, line[idx].value, "_start"))
+                    if (std.mem.eql(u8, line[idx].str, "_start"))
                         entry_point = ip;
 
-                    try program.append(Inst.new(.label, InstValue.new([]const u8, line[idx].value)));
+                    try program.append(Inst.new(.label, InstValue.new([]const u8, line[idx].str)));
                     try im.put(ip, line[idx].loc);
-                    try lm.put(line[idx].value, ip);
+                    try lm.put(line[idx].str, ip);
                     ip += 1;
                     continue;
                 }
 
-                const tyo = InstType.try_from_str(line[idx].value);
+                const tyo = InstType.try_from_str(line[idx].str);
                 if (tyo == null)
                     return report_err(line[idx].loc, Error.UNDEFINED_SYMBOL);
 

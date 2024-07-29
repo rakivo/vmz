@@ -1,14 +1,16 @@
 const std     = @import("std");
 const builtin = @import("builtin");
-const vm      = @import("vm.zig").Vm;
+const vm_mod  = @import("vm.zig");
 const nan_mod = @import("NaNBox.zig");
 const Token   = @import("lexer.zig").Token;
 
+const Vm        = vm_mod.Vm;
+const STR_CAP   = Vm.STR_CAP;
+const STACK_CAP = Vm.STACK_CAP;
+const panic     = vm_mod.panic;
+
 const NaNBox = nan_mod.NaNBox;
 const Type   = nan_mod.Type;
-
-const print = std.debug.print;
-const exit  = std.process.exit;
 
 // Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
@@ -104,6 +106,7 @@ pub const InstType = enum {
         return switch (self) {
             .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
             .call, .native => &[_]Token.Type{.str, .literal},
+            .fread => &[_]Token.Type{.int, .str},
             .spush => &[_]Token.Type{.int, .str, .char},
             .push => &[_]Token.Type{.int, .str, .char, .float},
             .alloc, .swap, .dup => &[_]Token.Type{.int},
@@ -130,7 +133,7 @@ pub const InstValue = union(enum) {
 
     const Self = @This();
 
-    const STR_CAP = 14;
+    const INST_STR_CAP = 14;
 
     pub inline fn to_bytes(self: *const Self) ![INST_CAP]u8 {
         var ret: [INST_CAP]u8 = undefined;
@@ -156,7 +159,7 @@ pub const InstValue = union(enum) {
                 size += 8;
             },
             .Str => |str| {
-                if (str.len > STR_CAP - size)
+                if (str.len > INST_STR_CAP - size)
                     return error.STR_IS_TOO_LONG;
 
                 ret[size] = @intCast(str.len);
@@ -226,10 +229,9 @@ pub const InstValue = union(enum) {
             void       => .{ .None = {} },
             NaNBox     => .{ .NaN = v },
             []const u8 => if (v.len > 1) {
-                if (v.len - 1 >= vm.STR_CAP) {
-                    const cap: usize = if (v.len - 1 >= vm.STACK_CAP) vm.STACK_CAP else vm.STR_CAP;
-                    print("String length: {} is greater than the maximum capacity {}\n", .{v.len, cap});
-                    exit(1);
+                if (v.len - 1 >= STR_CAP) {
+                    const cap: usize = if (v.len - 1 >= STACK_CAP) STACK_CAP else STR_CAP;
+                    panic("String length: {} is greater than the maximum capacity {}", .{v.len, cap});
                 } else return .{ .Str = v };
             } else return .{ .Str = &[_]u8{} },
             else       => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n")

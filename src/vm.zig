@@ -35,7 +35,12 @@ pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
 pub const InstMap  = std.AutoHashMap(u32, Loc);
 
-pub const DEBUG = false;
+const DEBUG = true;
+
+pub inline fn panic(comptime fmt: []const u8, args: anytype) !void {
+    std.log.err(fmt, args);
+    std.process.exit(1);
+}
 
 pub const Vm = struct {
     mp: u64 = 0,
@@ -173,8 +178,7 @@ pub const Vm = struct {
             .U8 => {
                 const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
                 _ = wstdout.write(buf) catch |err| {
-                    std.log.err("Failed to write to stdout: {}", .{err});
-                    exit(1);
+                    panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .I64, .U64, .F64 => {
@@ -186,8 +190,7 @@ pub const Vm = struct {
                     ret = try std.fmt.bufPrint(&buf,  "{}", .{v});
                 }
                 _ = wstdout.write(ret) catch |err| {
-                    std.log.err("Failed to write to stdout: {}", .{err});
-                    exit(1);
+                    panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .Str => if (self.stack.len() > v.as(u64)) {
@@ -201,8 +204,7 @@ pub const Vm = struct {
 
                 if (newline) str[i - 1] = 10;
                 _ = wstdout.write(str[0..i]) catch |err| {
-                    std.log.err("Failed to write to stdout: {}", .{err});
-                    exit(1);
+                    panic("Failed to write to stdout: {}", .{err});
                 };
             }
             else return error.STACK_UNDERFLOW,
@@ -344,6 +346,7 @@ pub const Vm = struct {
                             3 => wstderr.writeAll(self.memory[start..end]),
                             else => return error.INVALID_FD,
                         };
+
                         self.ip += 1;
                     },
                     .Str => {
@@ -357,15 +360,14 @@ pub const Vm = struct {
                         const file_path = str[0..i];
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);
-                        if (start >= self.mp or end >= self.mp or start == end)
+                        if (start >= STACK_CAP or end >= STACK_CAP or start == end)
                             return error.ILLEGAL_MEMORY_ACCESS;
 
                         std.fs.cwd().writeFile(.{
                             .sub_path = file_path,
                             .data = self.memory[start..end],
                         }) catch |err| {
-                            print("Failed to write to file {s}: {}\n", .{file_path, err});
-                            exit(1);
+                            panic("Failed to write to file {s}: {}\n", .{file_path, err});
                         };
                         self.ip += 1;
                     },
@@ -442,7 +444,7 @@ pub const Vm = struct {
                 var a = prelast.as(u64);
                 const b = last.as(u64);
 
-                if (b >= self.mp or b >= MEMORY_CAP)
+                if (b > self.mp or b >= MEMORY_CAP)
                     return error.ILLEGAL_MEMORY_ACCESS;
 
                 if (b - a + self.stack.len() >= STACK_CAP)

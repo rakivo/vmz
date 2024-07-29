@@ -11,9 +11,10 @@ const Flag       = flag_mod.Flag;
 const FlagParser = flag_mod.Parser;
 
 const Vm         = vm_mod.Vm;
-const LabelMap   = vm_mod.LabelMap;
+const panic      = vm_mod.panic;
 const InstMap    = vm_mod.InstMap;
 const Program    = vm_mod.Program;
+const LabelMap   = vm_mod.LabelMap;
 
 const Lexer      = lexer_mod.Lexer;
 const Loc        = lexer_mod.Token.Loc;
@@ -21,8 +22,9 @@ const Loc        = lexer_mod.Token.Loc;
 const INST_CAP   = inst_mod.INST_CAP;
 const Inst       = inst_mod.Inst;
 const InstValue  = inst_mod.InstValue;
+const InstType   = inst_mod.InstType;
 
-const exit       = std.process.exit;
+const exit = std.process.exit;
 
 const out_flag = Flag([]const u8, "-o", "--output", .{
     .help = "path to bin output file",
@@ -47,8 +49,11 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
 
 fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *FlagParser) !Parser.Parsed {
     return if (std.mem.endsWith(u8, file_path, ".asm")) {
-        var lexer = Lexer.init(file_path, alloc, flag_parser.parse(include_flag)) catch exit(1);
+        var lexer = Lexer.init(file_path, alloc, flag_parser.parse(include_flag));
         defer lexer.deinit();
+
+        const content = try Lexer.read_file(file_path, alloc);
+        try lexer.lex_file(content);
 
         var parser = Parser.new(file_path, alloc);
         return parser.parse(&lexer.tokens) catch exit(1);
@@ -61,6 +66,9 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         var program = Program.init(alloc);
 
         const file = try std.fs.cwd().readFileAlloc(alloc, file_path, 128 * 128);
+        if (file[0] < 0 or file[0] > @intFromEnum(InstType.halt))
+            panic("ERROR: Failed to get type of instruction from bytes", .{});
+
         while (bp < file.len) : (bp += INST_CAP) {
             const chunk = file[bp..bp + INST_CAP];
             const inst = try Inst.from_bytes(chunk);
