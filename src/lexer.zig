@@ -69,6 +69,7 @@ pub const Lexer = struct {
     pub const PATH_CAP = 8 * 64;
     pub const CONTENT_CAP = 1024 * 1024;
 
+    pub const MACRO_SYMBOL = "@";
     pub const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
 
     pub const Error = error {
@@ -125,11 +126,14 @@ pub const Lexer = struct {
 
     // Returns true if macro is multiline and false otherwise
     inline fn check_type_of_macro(line1: []const u8, line2: ?[]const u8) bool {
-        if (std.mem.indexOf(u8, line1, "{") != null) return true;
-        return if (line2) |some| {
-            if (std.mem.startsWith(u8, some, "#")) return false;
-            return std.mem.indexOf(u8, some, "{") != null;
-        } else false;
+        return if (std.mem.indexOf(u8, line1, "{") != null) return true
+        else if (line2) |some| {
+            return if (std.mem.startsWith(u8, some, "#"))
+                false
+            else
+                std.mem.indexOf(u8, some, "{") != null;
+        } else
+            false;
     }
 
     fn handle_preprocessor(self: *Self, line: []const u8, row: *u32, words: []const ss, iter: anytype) !void {
@@ -153,16 +157,14 @@ pub const Lexer = struct {
 
             try self.lex_file(include_content);
 
-
             // Append included macros into our existing `macro_map`
             var map_iter = new_self.macro_map.iterator();
-            while (map_iter.next()) |e| {
+            while (map_iter.next()) |e|
                 try self.macro_map.put(e.key_ptr.*, e.value_ptr.*);
-            }
 
-            for (new_self.tokens.items) |l| {
+            for (new_self.tokens.items) |l|
                 try self.tokens.append(l);
-            }
+
         } else {
             while (iter.peek()) |line_| {
                 if (line_.len > 0) break;
@@ -181,11 +183,13 @@ pub const Lexer = struct {
 
             if (check_type_of_macro(line, iter.peek())) {
                 var args = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
+
+                // Collect tokens after name of the macro and before `{`
                 for (pp_tokens.items) |pp| {
                     if (std.mem.eql(u8, pp.str, "{")) break;
                     if (std.mem.startsWith(u8, pp.str, "\"") or std.ascii.isDigit(pp.str[0])) {
-                        std.debug.print("ERROR: arg's name: {s} can not be string literal or digit\n", .{pp.str});
-                        return report_err(pp.loc, error.ARG_NAME_AS_DIGIT);
+                        std.debug.print("ERROR: arg's name: {s} can not be string or digit literal\n", .{pp.str});
+                        return report_err(pp.loc, error.ARG_NAME_AS_STRING_DIGIT_LITERAL);
                     }
 
                     if (std.mem.indexOf(u8, pp.str, ",")) |_| {
@@ -197,15 +201,15 @@ pub const Lexer = struct {
                     } else try args.append(pp);
                 }
 
+                // Skip until '{'
                 while (iter.peek()) |some| {
                     if (some.len == 0 or some[0] == '{') {
                         row.* += 1;
                         _ = iter.next();
-                    } else if (some.len > 0) {
-                        break;
-                    }
+                    } else if (some.len > 0) break;
                 }
 
+                // Collect tokens in between of curly braces
                 var body_str = std.ArrayList([]const u8).init(self.alloc);
                 while (iter.peek()) |some| {
                     if (some.len == 0 or some[0] == '}') break;
@@ -235,7 +239,9 @@ pub const Lexer = struct {
                     const splitted = try split_whitespace(l, self.alloc);
                     while (idx < splitted.len) : (idx += 1) {
                         const w = splitted[idx];
-                        if (std.mem.startsWith(u8, w.str, "@")) {
+
+                        // Found another macro in this macro
+                        if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
                             if (w.str.len == 1)
                                 return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNEXPECTED_EOF);
 
@@ -256,6 +262,7 @@ pub const Lexer = struct {
                         };
                         try new_words.append(pp);
                     }
+
                     try body.append(new_words.items);
                 }
 
@@ -270,7 +277,7 @@ pub const Lexer = struct {
                 var new_pps = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
                 while (idx < pp_tokens.items.len) : (idx += 1) {
                     const w = pp_tokens.items[idx];
-                    if (std.mem.startsWith(u8, w.str, "@")) {
+                    if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
                         if (w.str.len == 1)
                             return report_err(w.loc, error.UNEXPECTED_EOF);
 
@@ -283,18 +290,32 @@ pub const Lexer = struct {
                                     panic("TODO: Unimplemented", .{});
                                 }
                             }
-                            continue;
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{w.str});
                             return report_err(w.loc, error.UNDEFINED_MACRO);
                         }
+
+                        continue;
                     } else try new_pps.append(w);
                 }
+
                 try self.macro_map.put(name, .{
                     .single = new_pps.items
                 });
             }
         }
+    }
+
+    fn type_token_light(str: []const u8) Token.Type {
+        return if (std.mem.startsWith(u8, str, "\"")) .str
+        else if (std.mem.startsWith(u8, str, "'"))    .char
+        else if (std.mem.startsWith(u8, str, "-"))    .int
+        else if (std.ascii.isDigit(str[0])) {
+            return if (std.mem.indexOf(u8, str, ".") != null)
+                                                      .float
+            else
+                                                      .int;
+        } else                                        .literal;
     }
 
     fn type_token(self: *Self, idx: *u64, row: u32, line_tokens: *std.ArrayList(Token), word: ss, words: []const ss) !Token.Type {
@@ -334,10 +355,10 @@ pub const Lexer = struct {
             if (!std.ascii.isDigit(word.str[1]))
                 return error.INVALID_LITERAL;
 
-            if (std.mem.indexOf(u8, word.str[1..word.str.len], ".")) |_| {
-                return .float;
-            } else
-                return .int;
+            return if (std.mem.indexOf(u8, word.str[1..word.str.len], ".") != null)
+                .float
+            else
+                .int;
         }
 
         return if (std.ascii.isDigit(word.str[0])) {
@@ -349,28 +370,26 @@ pub const Lexer = struct {
     }
 
     fn type_pp_token(_: *Self, str: []const u8) !Token.Type {
-        if (std.mem.startsWith(u8, str, "\"")) {
-            return .str;
-        } else if (std.mem.startsWith(u8, str, "'")) {
-            return .char;
-        } else if (std.mem.startsWith(u8, str, "-")) {
+        return if (std.mem.startsWith(u8, str, "\""))                     .str
+        else if (std.mem.startsWith(u8, str, "'"))
+                                                                          .char
+        else if (std.mem.startsWith(u8, str, "-")) {
             if (str.len < 2)
                 return error.UNEXPECTED_EOF;
 
             if (!std.ascii.isDigit(str[1]))
                 return error.INVALID_LITERAL;
 
-            if (std.mem.indexOf(u8, str[1..str.len], ".")) |_| {
-                return .float;
-            } else
-                return .int;
-        } else if (std.ascii.isDigit(str[0])) {
-            if (std.mem.indexOf(u8, str, ".")) |_|
-                return .float
+            return if (std.mem.indexOf(u8, str[1..str.len], ".") != null)
+                                                                          .float
             else
-                return .int;
-        } else
-            return .literal;
+                                                                          .int;
+        } else if (std.ascii.isDigit(str[0])) {
+            return if (std.mem.indexOf(u8, str, ".") != null)
+                                                                          .float
+            else
+                                                                          .int;
+        } else                                                            .literal;
     }
 
     fn handle_macro(self: *Self, macro: Macro, row: u32, idx: *usize, line_tokens: *std.ArrayList(Token), words: []const ss) !void {
@@ -387,6 +406,7 @@ pub const Lexer = struct {
                     return;
                 }
 
+                // Skip name
                 idx.* += 1;
 
                 if (words.len - idx.* < pp.args.len) {
@@ -405,6 +425,8 @@ pub const Lexer = struct {
 
                     // Handle string literals
                     if (std.mem.startsWith(u8, str, "\"")) {
+                        defer count += 1;
+
                         var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, str.len);
                         defer strs.deinit();
 
@@ -422,7 +444,6 @@ pub const Lexer = struct {
                         };
 
                         try args_map.put(pp.args[count].str, wss);
-                        count += 1;
                         continue;
                     }
 
@@ -441,7 +462,8 @@ pub const Lexer = struct {
                             .s = words[idx.*].s,
                             .str = std.mem.trim(u8, str, ",")
                         };
-                    } else wss = words[idx.*];
+                    } else
+                        wss = words[idx.*];
 
                     try args_map.put(pp.args[count].str, wss);
                     count += 1;
@@ -451,32 +473,14 @@ pub const Lexer = struct {
                     var expansion = try std.ArrayList(Token).initCapacity(self.alloc, pp_line.len);
                     for (pp_line) |pp_t| {
                         if (args_map.get(pp_t.str)) |v| {
-                            var ty: Token.Type = undefined;
-                            if (std.mem.startsWith(u8, v.str, "\"")) {
-                                ty = .str;
-                            } else if (std.mem.startsWith(u8, v.str, "'")) {
-                                ty = .char;
-                            } else if (std.mem.startsWith(u8, v.str, "-")) {
-                                ty = .int;
-                            } else if (std.ascii.isDigit(v.str[0])) {
-                                if (std.mem.indexOf(u8, v.str, ".")) |_| {
-                                    ty = .float;
-                                } else {
-                                    ty = .int;
-                                }
-                            } else {
-                                ty = .literal;
-                            }
-
-                            const t = Token.new(ty, .{
+                            const t = Token.new(type_token_light(v.str), .{
                                 .row = row,
                                 .col = v.s,
                                 .file_path = self.file_path,
                             }, std.mem.trim(u8, v.str, "\""));
                             try expansion.append(t);
-                        } else {
+                        } else
                             try expansion.append(pp_t);
-                        }
                     }
                     try self.tokens.append(expansion.items);
                 }
@@ -487,11 +491,10 @@ pub const Lexer = struct {
                     const loc = pp_ts[pp_idx].loc;
                     const str = pp_ts[pp_idx].str;
                     const ty = try self.type_pp_token(str);
-                    if (ty == .str) {
-                        try line_tokens.append(Token.new(ty, loc, str[1..str.len - 1]));
-                    } else {
+                    if (ty == .str)
+                        try line_tokens.append(Token.new(ty, loc, str[1..str.len - 1]))
+                    else
                         try line_tokens.append(Token.new(ty, loc, str));
-                    }
                 }
             }
         }
@@ -525,6 +528,7 @@ pub const Lexer = struct {
                     .row = row, .col = start,
                     .file_path = self.file_path,
                 }, label);
+
                 try line_tokens.append(t);
                 continue;
             }
@@ -532,7 +536,7 @@ pub const Lexer = struct {
             var idx: usize = 0;
             while (idx < words.len) : (idx += 1) {
                 const word = words[idx];
-                if (std.mem.startsWith(u8, word.str, "@")) {
+                if (std.mem.startsWith(u8, word.str, MACRO_SYMBOL)) {
                     if (word.str.len == 1)
                         return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_EOF);
 
@@ -587,6 +591,3 @@ pub const Lexer = struct {
         return ret.items;
     }
 };
-
-// TODO:
-//    Make expansion of macros recursive.

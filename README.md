@@ -19,7 +19,7 @@ _start:
     dmpln
 }
 ```
-> After `#` you specify name of the macro, everything that goes after the name and before `{` will be interpreted as arguments, you can use those arguments in the body of the macro, which is specified by curly braces. You can also expand other macros in your macro as in here:
+> After `#` you specify a name of the macro, everything that goes after the name and before `{` will be interpreted as arguments, you can use those arguments in the body of the macro, which is specified by curly braces. You can also expand other macros in your macro as in here:
 ```asm
 #C 420
 
@@ -29,4 +29,4 @@ _start:
     push @B
 }
 ```
-> Unfortunately, you can not expand other multi-line (with curly braces) macro for now, as i didn't add support for that, but you can always send me a PR, I will deeply appreciate any help!
+> Unfortunately, you can not expand other multi-line macro (with curly braces) for now, as I didn't add support for that, but you can always send me a PR, I will deeply appreciate any help!
