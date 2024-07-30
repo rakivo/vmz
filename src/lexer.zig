@@ -126,7 +126,10 @@ pub const Lexer = struct {
     // Returns true if macro is multiline and false otherwise
     inline fn check_type_of_macro(line1: []const u8, line2: ?[]const u8) bool {
         if (std.mem.indexOf(u8, line1, "{") != null) return true;
-        return if (line2) |some| std.mem.indexOf(u8, some, "{") != null else false;
+        return if (line2) |some| {
+            if (std.mem.startsWith(u8, some, "#")) return false;
+            return std.mem.indexOf(u8, some, "{") != null;
+        } else false;
     }
 
     fn handle_preprocessor(self: *Self, line: []const u8, row: *u32, words: []const ss, iter: anytype) !void {
@@ -206,7 +209,6 @@ pub const Lexer = struct {
                 var body_str = std.ArrayList([]const u8).init(self.alloc);
                 while (iter.peek()) |some| {
                     if (some.len == 0 or some[0] == '}') break;
-                    row.* += 1;
                     try body_str.append(some);
                     _ = iter.next();
                 }
@@ -227,9 +229,25 @@ pub const Lexer = struct {
 
                 var body = std.ArrayList([]const Token).init(self.alloc);
                 for (body_str.items) |l| {
+                    defer row.* += 1;
+                    var idx: usize = 0;
                     var new_words = std.ArrayList(Token).init(self.alloc);
                     const splitted = try split_whitespace(l, self.alloc);
-                    for (splitted) |w| {
+                    while (idx < splitted.len) : (idx += 1) {
+                        const w = splitted[idx];
+                        if (std.mem.startsWith(u8, w.str, "@")) {
+                            if (w.str.len == 1)
+                                return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNEXPECTED_EOF);
+
+                            if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
+                                try self.handle_macro(macro, row.*, &idx, &new_words, words);
+                                continue;
+                            } else {
+                                print("ERROR: undefined macro: {s}\n", .{w.str});
+                                return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNDEFINED_MACRO);
+                            }
+                        }
+
                         const ty = try self.type_pp_token(w.str);
                         const pp = Token {
                             .type = ty,
@@ -248,8 +266,32 @@ pub const Lexer = struct {
                     }
                 });
             } else {
+                var idx: usize = 0;
+                var new_pps = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
+                while (idx < pp_tokens.items.len) : (idx += 1) {
+                    const w = pp_tokens.items[idx];
+                    if (std.mem.startsWith(u8, w.str, "@")) {
+                        if (w.str.len == 1)
+                            return report_err(w.loc, error.UNEXPECTED_EOF);
+
+                        if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
+                            switch (macro) {
+                                .single => |ts| {
+                                    try new_pps.appendSlice(ts);
+                                },
+                                .multi => |_| {
+                                    panic("TODO: Unimplemented", .{});
+                                }
+                            }
+                            continue;
+                        } else {
+                            print("ERROR: undefined macro: {s}\n", .{w.str});
+                            return report_err(w.loc, error.UNDEFINED_MACRO);
+                        }
+                    } else try new_pps.append(w);
+                }
                 try self.macro_map.put(name, .{
-                    .single = pp_tokens.items
+                    .single = new_pps.items
                 });
             }
         }
@@ -545,3 +587,6 @@ pub const Lexer = struct {
         return ret.items;
     }
 };
+
+// TODO:
+//    Make expansion of macros recursive.
