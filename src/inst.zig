@@ -118,7 +118,7 @@ pub const InstType = enum {
 pub const INST_CAP = 14 + 1 + 1;
 pub const None = InstValue.new(void, {});
 
-const InstValueType = enum {
+pub const InstValueType = enum {
     U8, I64, U64, F64, None, NaN, Str,
 };
 
@@ -158,15 +158,7 @@ pub const InstValue = union(enum) {
                 std.mem.copyForwards(u8, ret[size..size + 8], &std.mem.toBytes(f));
                 size += 8;
             },
-            .Str => |str| {
-                if (str.len > INST_STR_CAP - size)
-                    return error.STR_IS_TOO_LONG;
-
-                ret[size] = @intCast(str.len);
-                size += 1;
-                std.mem.copyForwards(u8, ret[size..size + str.len], str);
-                size += str.len;
-            },
+            .Str => unreachable,
             else => {},
         }
         return ret;
@@ -186,11 +178,9 @@ pub const InstValue = union(enum) {
     }
 
     pub fn from_bytes(bytes: []const u8) !Inst {
-        var idx: usize = 0;
-        const ty: InstType = @enumFromInt(bytes[idx]);
-        idx += 1;
-        const vty: InstValueType = @enumFromInt(bytes[idx]);
-        idx += 1;
+        const ty: InstType = @enumFromInt(bytes[0]);
+        const vty: InstValueType = @enumFromInt(bytes[1]);
+        var idx: usize = 2;
         return switch (vty) {
             .NaN => {
                 const f: f64 = @bitCast(g8b(bytes[idx..idx + 8]));

@@ -16,15 +16,16 @@ const InstMap    = vm_mod.InstMap;
 const Program    = vm_mod.Program;
 const LabelMap   = vm_mod.LabelMap;
 
-const Lexer      = lexer_mod.Lexer;
 const Loc        = lexer_mod.Token.Loc;
+const Lexer      = lexer_mod.Lexer;
+const report_err = lexer_mod.Lexer.report_err;
 
 const INST_CAP   = inst_mod.INST_CAP;
 const Inst       = inst_mod.Inst;
 const InstValue  = inst_mod.InstValue;
 const InstType   = inst_mod.InstType;
 
-const exit = std.process.exit;
+const exit       = std.process.exit;
 
 const out_flag = Flag([]const u8, "-o", "--output", .{
     .help = "path to bin output file",
@@ -42,8 +43,28 @@ const include_flag = Flag([]const u8, "-I", "--include", .{
 fn write_program(file_path: []const u8, program: []const Inst) !void {
     const file = try std.fs.cwd().createFile(file_path, .{});
     defer file.close();
+
     for (program) |inst| {
-        _ = try file.write(&try inst.to_bytes());
+        if (inst.value != .Str) continue;
+        const str = inst.value.Str;
+        const str_len: u8 = @intCast(str.len);
+        _ = try file.write(&[_]u8{str_len});
+        _ = try file.write(str);
+    }
+
+    _  = try file.write(";");
+
+    for (program) |inst| {
+        if (inst.value != .Str) {
+            _ = try file.write(&try inst.to_bytes());
+        } else {
+            var ret: [8]u8 = undefined;
+            ret[0] = inst.type.to_bytes();
+            ret[1] = @intFromEnum(inst_mod.InstValueType.Str);
+            const place_holder: *const [6:0]u8 = "STRING";
+            std.mem.copyForwards(u8, ret[2..8], place_holder);
+            _ = try file.write(&ret);
+        }
     }
 }
 
@@ -69,18 +90,51 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         if (file[0] < 0 or file[0] > @intFromEnum(InstType.halt))
             panic("ERROR: Failed to get type of instruction from bytes", .{});
 
+        var strs = std.ArrayList([]const u8).init(alloc);
+        while (bp < file.len) : (bp += 1) {
+            if (file[bp] == ';') break;
+            const str_len = file[bp];
+            const str = file[bp..bp + str_len];
+            bp += str_len;
+            try strs.append(str);
+        }
+
+        // Skip ';'
+        bp += 1;
+
+        var str_count: usize = 0;
+        std.debug.print("{any}\n", .{file[bp..file.len]});
         while (bp < file.len) : (bp += INST_CAP) {
             const chunk = file[bp..bp + INST_CAP];
-            const inst = try Inst.from_bytes(chunk);
-            if (inst.type == .label) {
-                if (std.mem.eql(u8, inst.value.Str, "_start"))
-                    entry_point = ip;
+            std.debug.print("{any}\n", .{chunk});
+            if (chunk[1] != @intFromEnum(inst_mod.InstValueType.Str)) {
+                const inst = try Inst.from_bytes(chunk);
+                if (inst.type == .label) {
+                    if (std.mem.eql(u8, inst.value.Str, "_start"))
+                        entry_point = ip;
 
-                try lm.put(inst.value.Str, ip);
+                    try lm.put(inst.value.Str, ip);
+                }
+
+                try im.put(ip, Loc.new(68, 68, file_path));
+                try program.append(try Inst.from_bytes(chunk));
+            } else {
+                const inst_type: InstType = @enumFromInt(chunk[0]);
+                const inst_value = InstValue {
+                    .Str = strs.items[str_count]
+                };
+
+                str_count += 1;
+
+                const inst = Inst {
+                    .type = inst_type,
+                    .value = inst_value
+                };
+
+                try im.put(ip, Loc.new(68, 68, file_path));
+                try program.append(inst);
             }
 
-            try im.put(ip, Loc {.row = 68, .col = 68, .file_path = file_path});
-            try program.append(try Inst.from_bytes(chunk));
             ip += 1;
         }
 
@@ -88,7 +142,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
             .lm = lm,
             .im = im,
             .ip = if (entry_point) |e| e else {
-                return Parser.report_err(Loc.new(68, 68, file_path), Parser.Error.NO_ENTRY_POINT);
+                return report_err(Loc.new(68, 68, file_path), Parser.Error.NO_ENTRY_POINT);
             },
             .program = program,
         };

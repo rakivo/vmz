@@ -16,6 +16,7 @@ const Loc           = lexer.Token.Loc;
 const Token         = lexer.Token;
 const MacroMap      = lexer.MacroMap;
 const LinizedTokens = lexer.LinizedTokens;
+const report_err    = lexer.Lexer.report_err;
 
 pub const Parser = struct {
     file_path: []const u8,
@@ -30,16 +31,6 @@ pub const Parser = struct {
         FAILED_TO_PARSE,
         UNDEFINED_SYMBOL,
     };
-
-    pub inline fn report_err(loc: Loc, err: anyerror) anyerror {
-        std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
-            loc.file_path,
-            loc.row + 1,
-            loc.col + 1,
-            err,
-        });
-        return err;
-    }
 
     fn parse_inst(_: *Self, ty: InstType, operand_str: Token) !Inst {
         switch (operand_str.type) {

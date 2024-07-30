@@ -9,8 +9,6 @@ const STR_CAP = vm_mod.Vm.STR_CAP;
 const exit  = std.process.exit;
 const print = std.debug.print;
 
-pub const LinizedTokens = std.ArrayList([]const Token);
-
 pub const Token = struct {
     type: Type,
     loc: Loc,
@@ -49,27 +47,31 @@ const Macro = union(enum) {
     single: []const PpToken,
     multi: struct {
         args: []const PpToken,
-        body: []const []const Token,
+        body: []const Tokens,
     },
 };
 
-pub const Tokens = std.ArrayList([]const Token);
+pub const Tokens = []const Token;
 pub const MacroMap = std.StringHashMap(Macro);
+pub const LinizedTokens = std.ArrayList(Tokens);
+pub const TokensArrayList = std.ArrayList(Tokens);
 
 pub const Lexer = struct {
+    macro_map: MacroMap,
+    tokens: TokensArrayList,
+    alloc: std.mem.Allocator,
+
     file_path: []const u8,
     include_path: ?[]const u8,
-    macro_map: MacroMap,
-    tokens: Tokens,
-
-    alloc: std.mem.Allocator,
 
     const Self = @This();
 
     pub const PATH_CAP = 8 * 64;
     pub const CONTENT_CAP = 1024 * 1024;
 
+    pub const PP_SYMBOL = "#";
     pub const MACRO_SYMBOL = "@";
+    pub const ERROR_TEXT = "ERROR";
     pub const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
 
     pub const Error = error {
@@ -80,14 +82,13 @@ pub const Lexer = struct {
         UNEXPECTED_SPACE_IN_MACRO_DEFINITION,
     };
 
-
     pub inline fn init(file_path: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) Self {
         return .{
             .alloc = alloc,
             .file_path = file_path,
             .include_path = include_path,
             .macro_map = MacroMap.init(alloc),
-            .tokens = Tokens.init(alloc)
+            .tokens = TokensArrayList.init(alloc)
         };
     }
 
@@ -96,8 +97,8 @@ pub const Lexer = struct {
         self.macro_map.deinit();
     }
 
-    inline fn report_err(loc: Token.Loc, err: anyerror) anyerror {
-        std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
+    pub inline fn report_err(loc: Token.Loc, err: anyerror) anyerror {
+        std.debug.print("{s}:{d}:{d}: " ++ ERROR_TEXT ++ ": {}\n", .{
             loc.file_path,
             loc.row + 1,
             loc.col + 1,
@@ -128,7 +129,7 @@ pub const Lexer = struct {
     inline fn check_type_of_macro(line1: []const u8, line2: ?[]const u8) bool {
         return if (std.mem.indexOf(u8, line1, "{") != null) return true
         else if (line2) |some| {
-            return if (std.mem.startsWith(u8, some, "#"))
+            return if (std.mem.startsWith(u8, some, PP_SYMBOL))
                 false
             else
                 std.mem.indexOf(u8, some, "{") != null;
@@ -136,7 +137,7 @@ pub const Lexer = struct {
             false;
     }
 
-    fn handle_preprocessor(self: *Self, line: []const u8, row: *u32, words: []const ss, iter: anytype) !void {
+    fn handle_preprocessor(self: *Self, row: *u32, line: []const u8, words: []const Ss, iter: anytype) !void {
         if (line.len < 2)
             return report_err(Token.Loc.new(row.*, 0, self.file_path), Error.UNEXPECTED_EOF);
 
@@ -228,10 +229,11 @@ pub const Lexer = struct {
                             .body = &[0][]const Token {},
                         }
                     });
+
                     return;
                 }
 
-                var body = std.ArrayList([]const Token).init(self.alloc);
+                var body = TokensArrayList.init(self.alloc);
                 for (body_str.items) |l| {
                     defer row.* += 1;
                     var idx: usize = 0;
@@ -283,12 +285,8 @@ pub const Lexer = struct {
 
                         if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
                             switch (macro) {
-                                .single => |ts| {
-                                    try new_pps.appendSlice(ts);
-                                },
-                                .multi => |_| {
-                                    panic("TODO: Unimplemented", .{});
-                                }
+                                .single => |ts| try new_pps.appendSlice(ts),
+                                .multi => |_| panic("TODO: Unimplemented", .{})
                             }
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{w.str});
@@ -299,9 +297,7 @@ pub const Lexer = struct {
                     } else try new_pps.append(w);
                 }
 
-                try self.macro_map.put(name, .{
-                    .single = new_pps.items
-                });
+                try self.macro_map.put(name, .{.single = new_pps.items});
             }
         }
     }
@@ -318,7 +314,10 @@ pub const Lexer = struct {
         } else                                        .literal;
     }
 
-    fn type_token(self: *Self, idx: *u64, row: u32, line_tokens: *std.ArrayList(Token), word: ss, words: []const ss) !Token.Type {
+    fn type_token(self: *Self, idx: *u64, row: u32,
+                  line_tokens: *std.ArrayList(Token), words: []const Ss) !Token.Type
+    {
+        const word = words[idx.*];
         if (std.mem.startsWith(u8, word.str, "\"")) {
             var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, word.str.len);
             defer strs.deinit();
@@ -330,7 +329,7 @@ pub const Lexer = struct {
                 if (std.mem.endsWith(u8, words[idx.*].str, "\"")) break;
             }
 
-            var str = try std.mem.join(self.alloc, " ", strs.items);
+            var str = (try std.mem.join(self.alloc, " ", strs.items));
             str = str[1..str.len - 1];
             const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
             try line_tokens.append(t);
@@ -392,7 +391,9 @@ pub const Lexer = struct {
         } else                                                            .literal;
     }
 
-    fn handle_macro(self: *Self, macro: Macro, row: u32, idx: *usize, line_tokens: *std.ArrayList(Token), words: []const ss) !void {
+    fn handle_macro(self: *Self, macro: Macro, row: u32, idx: *usize,
+                    line_tokens: *std.ArrayList(Token), words: []const Ss) !void
+    {
         const word = words[idx.*];
         switch (macro) {
             .multi => |pp| {
@@ -419,7 +420,7 @@ pub const Lexer = struct {
                 }
 
                 var count: usize = 0;
-                var args_map = std.StringHashMap(ss).init(self.alloc);
+                var args_map = std.StringHashMap(Ss).init(self.alloc);
                 while (idx.* < words.len) : (idx.* += 1) {
                     const str = words[idx.*].str;
 
@@ -456,7 +457,7 @@ pub const Lexer = struct {
                         }, error.TOO_MANY_ARGUMENTS);
                     }
 
-                    var wss: ss = undefined;
+                    var wss: Ss = undefined;
                     if (std.mem.indexOf(u8, str, ",") != null or std.mem.indexOf(u8, str, "\"") != null) {
                         wss = .{
                             .s = words[idx.*].s,
@@ -511,8 +512,8 @@ pub const Lexer = struct {
             defer self.tokens.append(line_tokens.items) catch exit(1);
 
             // Found a preprocessor thingy
-            if (std.mem.startsWith(u8, line, "#")) {
-                try self.handle_preprocessor(line, &row, words, &iter);
+            if (std.mem.startsWith(u8, line, PP_SYMBOL)) {
+                try self.handle_preprocessor(&row, line, words, &iter);
                 continue;
             }
 
@@ -521,8 +522,8 @@ pub const Lexer = struct {
                 if (words.len > 1)
                     return report_err(Token.Loc.new(row, words[0].s, self.file_path), Error.UNDEFINED_SYMBOL);
 
-                const label = words[0].str[0..words[0].str.len - 1];
                 const start = words[0].s;
+                const label = words[0].str[0..words[0].str.len - 1];
 
                 const t = Token.new(.label, .{
                     .row = row, .col = start,
@@ -549,7 +550,7 @@ pub const Lexer = struct {
                     }
                 }
 
-                const ty = self.type_token(&idx, row, &line_tokens, word, words) catch |err| {
+                const ty = self.type_token(&idx, row, &line_tokens, words) catch |err| {
                     return report_err(Token.Loc.new(row, word.s, self.file_path), err);
                 };
                 const t = Token.new(ty, Token.Loc.new(row, word.s, self.file_path), word.str);
@@ -564,23 +565,22 @@ pub const Lexer = struct {
         };
     }
 
-    const ss = struct {
+    const Ss = struct {
         s: u32,
         str: []const u8,
     };
 
-    fn split_whitespace(input: []const u8, alloc: std.mem.Allocator) ![]const ss {
+    fn split_whitespace(input: []const u8, alloc: std.mem.Allocator) ![]const Ss {
         var s: u32 = 0;
         var e: u32 = 0;
-        var ret = std.ArrayList(ss).init(alloc);
+        var ret = std.ArrayList(Ss).init(alloc);
         while (e < input.len) : (e += 1)
             if (std.ascii.isWhitespace(input[e])) {
+                defer s = e + 1;
                 if (s != e)
                     try ret.append(.{
                         .s = s, .str = input[s..e]
                     });
-
-                s = e + 1;
             };
 
         if (s != e)
