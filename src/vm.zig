@@ -35,7 +35,7 @@ pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
 pub const InstMap  = std.AutoHashMap(u32, Loc);
 
-const DEBUG = true;
+const DEBUG = false;
 
 pub inline fn panic(comptime fmt: []const u8, args: anytype) !void {
     std.log.err(fmt, args);
@@ -202,10 +202,16 @@ pub const Vm = struct {
                 while (i < nans.len) : (i += 1)
                     str[i] = nans[i].as(u8);
 
-                if (newline) str[i - 1] = 10;
-                _ = wstdout.write(str[0..i]) catch |err| {
-                    panic("Failed to write to stdout: {}", .{err});
-                };
+                if (newline) {
+                    str[i - 1] = 10;
+                    _ = wstdout.write(str[0..i]) catch |err| {
+                        panic("Failed to write to stdout: {}", .{err});
+                    };
+                } else {
+                    _ = wstdout.write(str[0..i - 1]) catch |err| {
+                        panic("Failed to write to stdout: {}", .{err});
+                    };
+                }
             }
             else return error.STACK_UNDERFLOW,
         }

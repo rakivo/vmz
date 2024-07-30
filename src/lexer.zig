@@ -66,11 +66,13 @@ pub const Lexer = struct {
 
     const Self = @This();
 
+    pub const PATH_CAP = 8 * 64;
     pub const CONTENT_CAP = 1024 * 1024;
+
+    pub const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
 
     pub const Error = error {
         INVALID_CHAR,
-        NAME_CONFLICT,
         UNEXPECTED_EOF,
         NO_CLOSING_QUOTE,
         UNDEFINED_SYMBOL,
@@ -107,10 +109,6 @@ pub const Lexer = struct {
         return .{
             std.fs.cwd().readFileAlloc(self.alloc, self.file_path, CONTENT_CAP) catch |err| {
                 if (self.include_path) |path| {
-                    // format these constants out of here.
-                    const PATH_CAP = 128;
-                    const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
-
                     var path_buf_: [PATH_CAP]u8 = undefined;
                     const path_buf = try std.fmt.bufPrint(&path_buf_, "{s}{c}{s}", .{path, DELIM, self.file_path});
                     if (path_buf.len >= PATH_CAP)
@@ -143,13 +141,25 @@ pub const Lexer = struct {
                 return report_err(Token.Loc.new(row.*, @intCast(line.len), self.file_path), Error.NO_CLOSING_QUOTE);
 
             var new_self = Self.init(line[2..line.len - 1], self.alloc, self.include_path);
+
             const ret = try new_self.get_include_content();
+
             const include_content = @field(ret, "0");
             const full_include_path = @field(ret, "1");
             new_self.file_path = full_include_path;
+
             try self.lex_file(include_content);
-            for (new_self.tokens.items) |l|
+
+
+            // Append included macros into our existing `macro_map`
+            var map_iter = new_self.macro_map.iterator();
+            while (map_iter.next()) |e| {
+                try self.macro_map.put(e.key_ptr.*, e.value_ptr.*);
+            }
+
+            for (new_self.tokens.items) |l| {
                 try self.tokens.append(l);
+            }
         } else {
             while (iter.peek()) |line_| {
                 if (line_.len > 0) break;
@@ -158,21 +168,11 @@ pub const Lexer = struct {
             }
 
             const name = words[0].str[1..words[0].str.len];
-            if (InstType.try_from_str(name) != null) {
-                std.debug.print("ERROR: Macro's name `{s}` conflicts with instruction name: `{s}`\n", .{name, name});
-                const loc = .{.file_path = self.file_path, .row = row.*, .col = words[0].s + 1};
-                return report_err(loc, Error.NAME_CONFLICT);
-            }
-
             var pp_tokens = try std.ArrayList(PpToken).initCapacity(self.alloc, words.len - 1);
             for (words[1..]) |t| {
                 try pp_tokens.append(.{
                     .str = t.str,
-                    .loc = .{
-                        .file_path = self.file_path,
-                        .row = row.*,
-                        .col = t.s,
-                    }
+                    .loc = Token.Loc.new(row.*, t.s, self.file_path)
                 });
             }
 
@@ -203,11 +203,11 @@ pub const Lexer = struct {
                     }
                 }
 
-                var body = std.ArrayList([]const u8).init(self.alloc);
+                var body_str = std.ArrayList([]const u8).init(self.alloc);
                 while (iter.peek()) |some| {
                     if (some.len == 0 or some[0] == '}') break;
                     row.* += 1;
-                    try body.append(some);
+                    try body_str.append(some);
                     _ = iter.next();
                 }
 
@@ -215,7 +215,7 @@ pub const Lexer = struct {
                 _ = iter.next();
                 row.* += 1;
 
-                if (body.items.len == 0) {
+                if (body_str.items.len == 0) {
                     try self.macro_map.put(name, .{
                         .multi = .{
                             .args = args.items,
@@ -225,8 +225,8 @@ pub const Lexer = struct {
                     return;
                 }
 
-                var words2D = std.ArrayList([]const Token).init(self.alloc);
-                for (body.items) |l| {
+                var body = std.ArrayList([]const Token).init(self.alloc);
+                for (body_str.items) |l| {
                     var new_words = std.ArrayList(Token).init(self.alloc);
                     const splitted = try split_whitespace(l, self.alloc);
                     for (splitted) |w| {
@@ -234,21 +234,17 @@ pub const Lexer = struct {
                         const pp = Token {
                             .type = ty,
                             .str = w.str,
-                            .loc = .{
-                                .row = row.*,
-                                .col = w.s,
-                                .file_path = self.file_path,
-                            }
+                            .loc = Token.Loc.new(row.*, w.s, self.file_path)
                         };
                         try new_words.append(pp);
                     }
-                    try words2D.append(new_words.items);
+                    try body.append(new_words.items);
                 }
 
                 try self.macro_map.put(name, .{
                     .multi = .{
                         .args = args.items,
-                        .body = words2D.items
+                        .body = body.items
                     }
                 });
             } else {
@@ -273,10 +269,7 @@ pub const Lexer = struct {
 
             var str = try std.mem.join(self.alloc, " ", strs.items);
             str = str[1..str.len - 1];
-            const t = Token.new(.str, .{
-                .row = row, .col = word.s,
-                .file_path = self.file_path,
-            }, str);
+            const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
             try line_tokens.append(t);
         }
 
@@ -287,10 +280,7 @@ pub const Lexer = struct {
             if (word.str.len != 3)
                 return Error.INVALID_CHAR;
 
-            const t = Token.new(.char, .{
-                .row = row, .col = word.s,
-                .file_path = self.file_path
-            }, word.str[1..2]);
+            const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str[1..2]);
             try line_tokens.append(t);
             idx.* += 1;
         }
@@ -341,6 +331,130 @@ pub const Lexer = struct {
             return .literal;
     }
 
+    fn handle_macro(self: *Self, macro: Macro, row: u32, idx: *usize, line_tokens: *std.ArrayList(Token), words: []const ss) !void {
+        const word = words[idx.*];
+        switch (macro) {
+            .multi => |pp| {
+                if (pp.args.len == 0) {
+                    if (words.len > 1) {
+                        print("ERROR: unexpected arguments when macro: {s} does not accept any\n", .{word.str});
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_ARGUMENTS);
+                    }
+
+                    try self.tokens.appendSlice(pp.body);
+                    return;
+                }
+
+                idx.* += 1;
+
+                if (words.len - idx.* < pp.args.len) {
+                    print("ERROR: too few arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
+                    return report_err(.{
+                        .row = row,
+                        .col = word.s,
+                        .file_path = self.file_path,
+                    }, error.TOO_FEW_ARGUMENTS);
+                }
+
+                var count: usize = 0;
+                var args_map = std.StringHashMap(ss).init(self.alloc);
+                while (idx.* < words.len) : (idx.* += 1) {
+                    const str = words[idx.*].str;
+
+                    // Handle string literals
+                    if (std.mem.startsWith(u8, str, "\"")) {
+                        var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, str.len);
+                        defer strs.deinit();
+
+                        while (true) : (idx.* += 1) {
+                            if (idx.* >= words.len)
+                                return Error.NO_CLOSING_QUOTE;
+
+                            try strs.append(words[idx.*].str);
+                            if (std.mem.endsWith(u8, words[idx.*].str, "\"")) break;
+                        }
+
+                        const wss = .{
+                            .s = word.s,
+                            .str = try std.mem.join(self.alloc, " ", strs.items),
+                        };
+
+                        try args_map.put(pp.args[count].str, wss);
+                        count += 1;
+                        continue;
+                    }
+
+                    if (count >= pp.args.len or args_map.unmanaged.size > pp.args.len) {
+                        print("ERROR: too many arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
+                        return report_err(.{
+                            .row = row,
+                            .col = word.s,
+                            .file_path = self.file_path,
+                        }, error.TOO_MANY_ARGUMENTS);
+                    }
+
+                    var wss: ss = undefined;
+                    if (std.mem.indexOf(u8, str, ",") != null or std.mem.indexOf(u8, str, "\"") != null) {
+                        wss = .{
+                            .s = words[idx.*].s,
+                            .str = std.mem.trim(u8, str, ",")
+                        };
+                    } else wss = words[idx.*];
+
+                    try args_map.put(pp.args[count].str, wss);
+                    count += 1;
+                }
+
+                for (pp.body) |pp_line| {
+                    var expansion = try std.ArrayList(Token).initCapacity(self.alloc, pp_line.len);
+                    for (pp_line) |pp_t| {
+                        if (args_map.get(pp_t.str)) |v| {
+                            var ty: Token.Type = undefined;
+                            if (std.mem.startsWith(u8, v.str, "\"")) {
+                                ty = .str;
+                            } else if (std.mem.startsWith(u8, v.str, "'")) {
+                                ty = .char;
+                            } else if (std.mem.startsWith(u8, v.str, "-")) {
+                                ty = .int;
+                            } else if (std.ascii.isDigit(v.str[0])) {
+                                if (std.mem.indexOf(u8, v.str, ".")) |_| {
+                                    ty = .float;
+                                } else {
+                                    ty = .int;
+                                }
+                            } else {
+                                ty = .literal;
+                            }
+
+                            const t = Token.new(ty, .{
+                                .row = row,
+                                .col = v.s,
+                                .file_path = self.file_path,
+                            }, std.mem.trim(u8, v.str, "\""));
+                            try expansion.append(t);
+                        } else {
+                            try expansion.append(pp_t);
+                        }
+                    }
+                    try self.tokens.append(expansion.items);
+                }
+            },
+            .single => |pp_ts| {
+                var pp_idx: usize = 0;
+                while (pp_idx < pp_ts.len) : (pp_idx += 1) {
+                    const loc = pp_ts[pp_idx].loc;
+                    const str = pp_ts[pp_idx].str;
+                    const ty = try self.type_pp_token(str);
+                    if (ty == .str) {
+                        try line_tokens.append(Token.new(ty, loc, str[1..str.len - 1]));
+                    } else {
+                        try line_tokens.append(Token.new(ty, loc, str));
+                    }
+                }
+            }
+        }
+    }
+
     pub fn lex_file(self: *Self, content: []const u8) anyerror!void {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
@@ -351,6 +465,7 @@ pub const Lexer = struct {
             var line_tokens = try std.ArrayList(Token).initCapacity(self.alloc, words.len);
             defer self.tokens.append(line_tokens.items) catch exit(1);
 
+            // Found a preprocessor thingy
             if (std.mem.startsWith(u8, line, "#")) {
                 try self.handle_preprocessor(line, &row, words, &iter);
                 continue;
@@ -375,106 +490,17 @@ pub const Lexer = struct {
             var idx: usize = 0;
             while (idx < words.len) : (idx += 1) {
                 const word = words[idx];
-                if (self.macro_map.get(std.mem.trim(u8, word.str, " "))) |macro| {
-                    switch (macro) {
-                        .multi => |pp| {
-                            if (pp.args.len == 0) {
-                                if (words.len > 1) {
-                                    print("ERROR: unexpected arguments when macro: {s} does not accept any\n", .{word.str});
-                                    return report_err(.{
-                                        .row = row,
-                                        .col = word.s,
-                                        .file_path = self.file_path,
-                                    }, error.UNEXPECTED_ARGUMENTS);
-                                }
+                if (std.mem.startsWith(u8, word.str, "@")) {
+                    if (word.str.len == 1)
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_EOF);
 
-                                try self.tokens.appendSlice(pp.body);
-                                continue;
-                            }
-
-                            idx += 1;
-
-                            if (words.len - idx < pp.args.len) {
-                                print("ERROR: too few arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
-                                return report_err(.{
-                                    .row = row,
-                                    .col = word.s,
-                                    .file_path = self.file_path,
-                                }, error.TOO_FEW_ARGUMENTS);
-                            }
-
-                            var count: usize = 0;
-                            var args_map = std.StringHashMap(ss).init(self.alloc);
-                            while (idx < words.len) : (idx += 1) {
-                                if (count >= pp.args.len or args_map.unmanaged.size > pp.args.len) {
-                                    print("ERROR: too many arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
-                                    return report_err(.{
-                                        .row = row,
-                                        .col = word.s,
-                                        .file_path = self.file_path,
-                                    }, error.TOO_MANY_ARGUMENTS);
-                                }
-
-                                var wss: ss = undefined;
-                                if (std.mem.indexOf(u8, words[idx].str, ",") != null or std.mem.indexOf(u8, words[idx].str, "\"") != null) {
-                                    wss = .{
-                                        .s = words[idx].s,
-                                        .str = std.mem.trim(u8, words[idx].str, ",")
-                                    };
-                                } else wss = words[idx];
-
-                                try args_map.put(pp.args[count].str, wss);
-                                count += 1;
-                            }
-
-                            for (pp.body) |pp_line| {
-                                var expansion = try std.ArrayList(Token).initCapacity(self.alloc, pp_line.len);
-                                for (pp_line) |pp_t| {
-                                    if (args_map.get(pp_t.str)) |v| {
-                                        var ty: Token.Type = undefined;
-                                        if (std.mem.startsWith(u8, v.str, "\"")) {
-                                            ty = .str;
-                                        } else if (std.mem.startsWith(u8, v.str, "'")) {
-                                            ty = .char;
-                                        } else if (std.mem.startsWith(u8, v.str, "-")) {
-                                            ty = .int;
-                                        } else if (std.ascii.isDigit(v.str[0])) {
-                                            if (std.mem.indexOf(u8, v.str, ".")) |_| {
-                                                ty = .float;
-                                            } else
-                                                ty = .int;
-                                        } else {
-                                            ty = .literal;
-                                        }
-
-                                        const t = Token.new(ty, .{
-                                            .row = row,
-                                            .col = v.s,
-                                            .file_path = self.file_path,
-                                        }, std.mem.trim(u8, v.str, "\""));
-                                        try expansion.append(t);
-                                    } else {
-                                        try expansion.append(pp_t);
-                                    }
-                                }
-                                try self.tokens.append(expansion.items);
-                            }
-                        },
-                        .single => |pp_ts| {
-                            var pp_idx: usize = 0;
-                            while (pp_idx < pp_ts.len) : (pp_idx += 1) {
-                                const loc = pp_ts[pp_idx].loc;
-                                const str = pp_ts[pp_idx].str;
-                                const ty = try self.type_pp_token(str);
-                                if (ty == .str) {
-                                    try line_tokens.append(Token.new(ty, loc, str[1..str.len - 1]));
-                                } else {
-                                    try line_tokens.append(Token.new(ty, loc, str));
-                                }
-                            }
-                        }
+                    if (self.macro_map.get(std.mem.trim(u8, word.str[1..word.str.len], " "))) |macro| {
+                        try self.handle_macro(macro, row, &idx, &line_tokens, words);
+                        continue;
+                    } else {
+                        print("ERROR: undefined macro: {s}\n", .{word.str});
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNDEFINED_MACRO);
                     }
-                    continue;
                 }
 
                 const ty = self.type_token(&idx, row, &line_tokens, word, words) catch |err| {
