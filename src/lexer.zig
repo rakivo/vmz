@@ -46,7 +46,7 @@ const PpToken = struct {
 const Macro = union(enum) {
     single: []const PpToken,
     multi: struct {
-        args: []const PpToken,
+        args: Tokens,
         body: []const Tokens,
     },
 };
@@ -183,23 +183,20 @@ pub const Lexer = struct {
             }
 
             if (check_type_of_macro(line, iter.peek())) {
-                var args = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
+                var args = try std.ArrayList(Token).initCapacity(self.alloc, pp_tokens.items.len);
 
                 // Collect tokens after name of the macro and before `{`
-                for (pp_tokens.items) |pp| {
+                var idx_: usize = 0;
+                while (idx_ < pp_tokens.items.len) : (idx_ += 1) {
+                    const pp = pp_tokens.items[idx_];
                     if (std.mem.eql(u8, pp.str, "{")) break;
-                    if (std.mem.startsWith(u8, pp.str, "\"") or std.ascii.isDigit(pp.str[0])) {
-                        std.debug.print("ERROR: arg's name: {s} can not be string or digit literal\n", .{pp.str});
+                    if (!std.ascii.isAlphabetic(pp.str[0])) {
+                        std.debug.print("ERROR: arg's name: {s} can must be alphabetic\n", .{pp.str});
                         return report_err(pp.loc, error.ARG_NAME_AS_STRING_DIGIT_LITERAL);
                     }
 
-                    if (std.mem.indexOf(u8, pp.str, ",")) |_| {
-                        const new_pp = PpToken {
-                            .loc = pp.loc,
-                            .str = std.mem.trim(u8, pp.str, ",")
-                        };
-                        try args.append(new_pp);
-                    } else try args.append(pp);
+                    const new_pp = Token.new(type_token_light(pp.str), pp.loc, std.mem.trim(u8, pp.str, ","));
+                    try args.append(new_pp);
                 }
 
                 // Skip until '{'
@@ -279,9 +276,15 @@ pub const Lexer = struct {
                 var new_pps = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
                 while (idx < pp_tokens.items.len) : (idx += 1) {
                     const w = pp_tokens.items[idx];
+                    const loc = Token.Loc.new(w.loc.row -% 1, w.loc.col, w.loc.file_path);
                     if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
                         if (w.str.len == 1)
                             return report_err(w.loc, error.UNEXPECTED_EOF);
+
+                        var it = self.macro_map.iterator();
+                        while (it.next()) |e| {
+                            print("{s} : {}\n", .{e.key_ptr.*, e.value_ptr.*});
+                        }
 
                         if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
                             switch (macro) {
@@ -290,10 +293,27 @@ pub const Lexer = struct {
                             }
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{w.str});
-                            return report_err(w.loc, error.UNDEFINED_MACRO);
+                            return report_err(loc, error.UNDEFINED_MACRO);
                         }
 
                         continue;
+                    } else if (std.mem.startsWith(u8, w.str, "\"")) {
+                        var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, w.str.len);
+                        defer strs.deinit();
+                        while (true) : (idx += 1) {
+                            if (idx >= pp_tokens.items.len)
+                                return Error.NO_CLOSING_QUOTE;
+
+                            try strs.append(pp_tokens.items[idx].str);
+                            if (std.mem.endsWith(u8, pp_tokens.items[idx].str, "\"")) break;
+                        }
+
+                        const str = try std.mem.join(self.alloc, " ", strs.items);
+                        const t = PpToken {
+                            .loc = w.loc,
+                            .str = str,
+                        };
+                        try new_pps.append(t);
                     } else try new_pps.append(w);
                 }
 
@@ -329,7 +349,7 @@ pub const Lexer = struct {
                 if (std.mem.endsWith(u8, words[idx.*].str, "\"")) break;
             }
 
-            var str = (try std.mem.join(self.alloc, " ", strs.items));
+            var str = try std.mem.join(self.alloc, " ", strs.items);
             str = str[1..str.len - 1];
             const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
             try line_tokens.append(t);
@@ -435,8 +455,9 @@ pub const Lexer = struct {
                             if (idx.* >= words.len)
                                 return Error.NO_CLOSING_QUOTE;
 
-                            try strs.append(words[idx.*].str);
-                            if (std.mem.endsWith(u8, words[idx.*].str, "\"")) break;
+                            const str_ = words[idx.*].str;
+                            try strs.append(str_);
+                            if (std.mem.endsWith(u8, str_, "\"")) break;
                         }
 
                         const wss = .{
@@ -448,23 +469,46 @@ pub const Lexer = struct {
                         continue;
                     }
 
+                    const loc = Token.Loc.new(row, word.s, self.file_path);
                     if (count >= pp.args.len or args_map.unmanaged.size > pp.args.len) {
                         print("ERROR: too many arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
-                        return report_err(.{
-                            .row = row,
-                            .col = word.s,
-                            .file_path = self.file_path,
-                        }, error.TOO_MANY_ARGUMENTS);
+                        return report_err(loc , error.TOO_MANY_ARGUMENTS);
                     }
 
-                    var wss: Ss = undefined;
-                    if (std.mem.indexOf(u8, str, ",") != null or std.mem.indexOf(u8, str, "\"") != null) {
-                        wss = .{
+                    const wss = if (std.mem.indexOf(u8, str, ",") != null or std.mem.indexOf(u8, str, "\"") != null)
+                        Ss {
                             .s = words[idx.*].s,
                             .str = std.mem.trim(u8, str, ",")
-                        };
-                    } else
-                        wss = words[idx.*];
+                        }
+                    else
+                        words[idx.*];
+
+                    if (std.mem.startsWith(u8, wss.str, MACRO_SYMBOL)) {
+                        if (wss.str.len == 1)
+                            return report_err(loc, error.UNEXPECTED_EOF);
+
+                        if (self.macro_map.get(std.mem.trim(u8, wss.str[1..wss.str.len], " "))) |new_macro| {
+                            var macro_tokens = std.ArrayList(Token).init(self.alloc);
+                            try self.handle_macro(new_macro, row, idx, &macro_tokens, words);
+
+                            const wss_ = if (macro_tokens.items.len > 0)
+                                Ss {
+                                    .s = macro_tokens.items[0].loc.col,
+                                    .str = macro_tokens.items[0].str,
+                                }
+                            else
+                                Ss {
+                                    .s = wss.s,
+                                    .str = "",
+                                };
+
+                            try args_map.put(pp.args[count].str, wss_);
+                            continue;
+                        } else {
+                            print("ERROR: undefined macro: {s}\n", .{wss.str});
+                            return report_err(loc, error.UNDEFINED_MACRO);
+                        }
+                    }
 
                     try args_map.put(pp.args[count].str, wss);
                     count += 1;

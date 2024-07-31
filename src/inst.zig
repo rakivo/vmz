@@ -83,11 +83,6 @@ pub const InstType = enum {
 
     const Self = @This();
 
-    pub inline fn to_bytes(self: *const Self) u8 {
-        const int: u8 = @intFromEnum(self.*);
-        return int;
-    }
-
     pub fn try_from_str(str: []const u8) ?Self {
         return inline for (std.meta.fields(Self)) |f| {
             if (std.mem.eql(u8, f.name, str))
@@ -134,35 +129,6 @@ pub const InstValue = union(enum) {
     const Self = @This();
 
     const INST_STR_CAP = 14;
-
-    pub inline fn to_bytes(self: *const Self) ![INST_CAP]u8 {
-        var ret: [INST_CAP]u8 = undefined;
-        var size: usize = 0;
-        size += 1;
-        ret[size] = @intFromEnum(self.*);
-        size += 1;
-        switch (self.*) {
-            .NaN => |nan| {
-                std.mem.copyForwards(u8, ret[size..size + 8], &std.mem.toBytes(nan.v));
-                size += 8;
-            },
-            .I64 => |int| {
-                std.mem.copyForwards(u8, ret[size..size + 8], &std.mem.toBytes(int));
-                size += 8;
-            },
-            .U64 => |int| {
-                std.mem.copyForwards(u8, ret[size..size + 8], &std.mem.toBytes(int));
-                size += 8;
-            },
-            .F64 => |f| {
-                std.mem.copyForwards(u8, ret[size..size + 8], &std.mem.toBytes(f));
-                size += 8;
-            },
-            .Str => unreachable,
-            else => {},
-        }
-        return ret;
-    }
 
     pub inline fn g8b(bytes: []const u8) [8]u8 {
         return [8]u8 {
@@ -236,14 +202,8 @@ pub const Inst = struct {
     const Self = @This();
 
     pub inline fn from_bytes(bytes: []const u8) !Inst {
-        std.debug.assert(bytes.len == INST_CAP);
+        std.debug.assert(bytes.len == 10);
         return InstValue.from_bytes(bytes);
-    }
-
-    pub inline fn to_bytes(self: *const Self) ![INST_CAP]u8 {
-        var bytes = try self.value.to_bytes();
-        bytes[0] = self.type.to_bytes();
-        return bytes;
     }
 
     pub inline fn new(typ: InstType, value: InstValue) Self {

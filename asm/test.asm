@@ -1,5 +1,10 @@
-@STR "hello world"
+#STR "hello world"
+#N 420
+
+#hello arg {
+    push arg
+}
 
 _start:
-    push 420
-    push @STR
+    @hello @N
+    dmpln

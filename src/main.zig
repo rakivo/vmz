@@ -1,31 +1,32 @@
-const std        = @import("std");
-const vm_mod     = @import("vm.zig");
-const inst_mod   = @import("inst.zig");
-const flag_mod   = @import("flag.zig");
-const lexer_mod  = @import("lexer.zig");
-const NaNBox     = @import("NaNBox.zig").NaNBox;
-const Parser     = @import("parser.zig").Parser;
-const Natives    = @import("natives.zig").Natives;
+const std       = @import("std");
+const vm_mod    = @import("vm.zig");
+const inst_mod  = @import("inst.zig");
+const flag_mod  = @import("flag.zig");
+const lexer_mod = @import("lexer.zig");
+const NaNBox    = @import("NaNBox.zig").NaNBox;
+const Parser    = @import("parser.zig").Parser;
+const Natives   = @import("natives.zig").Natives;
 
-const Flag       = flag_mod.Flag;
-const FlagParser = flag_mod.Parser;
+const Flag          = flag_mod.Flag;
+const FlagParser    = flag_mod.Parser;
 
-const Vm         = vm_mod.Vm;
-const panic      = vm_mod.panic;
-const InstMap    = vm_mod.InstMap;
-const Program    = vm_mod.Program;
-const LabelMap   = vm_mod.LabelMap;
+const Vm            = vm_mod.Vm;
+const panic         = vm_mod.panic;
+const InstMap       = vm_mod.InstMap;
+const Program       = vm_mod.Program;
+const LabelMap      = vm_mod.LabelMap;
 
-const Loc        = lexer_mod.Token.Loc;
-const Lexer      = lexer_mod.Lexer;
-const report_err = lexer_mod.Lexer.report_err;
+const Loc           = lexer_mod.Token.Loc;
+const Lexer         = lexer_mod.Lexer;
+const report_err    = lexer_mod.Lexer.report_err;
 
-const INST_CAP   = inst_mod.INST_CAP;
-const Inst       = inst_mod.Inst;
-const InstValue  = inst_mod.InstValue;
-const InstType   = inst_mod.InstType;
+const INST_CAP      = inst_mod.INST_CAP;
+const Inst          = inst_mod.Inst;
+const InstValue     = inst_mod.InstValue;
+const InstType      = inst_mod.InstType;
+const InstValueType = inst_mod.InstValueType;
 
-const exit       = std.process.exit;
+const exit          = std.process.exit;
 
 const out_flag = Flag([]const u8, "-o", "--output", .{
     .help = "path to bin output file",
@@ -40,6 +41,8 @@ const include_flag = Flag([]const u8, "-I", "--include", .{
     .help = "include path",
 }).new();
 
+const CHUNK_SIZE = 10;
+
 fn write_program(file_path: []const u8, program: []const Inst) !void {
     const file = try std.fs.cwd().createFile(file_path, .{});
     defer file.close();
@@ -52,17 +55,29 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
         _ = try file.write(str);
     }
 
-    _  = try file.write(";");
+    const SEMI_COLON = [1]u8{';'};
+    _ = try file.write(&SEMI_COLON);
 
     for (program) |inst| {
         if (inst.value != .Str) {
-            _ = try file.write(&try inst.to_bytes());
+            var ret: [CHUNK_SIZE]u8 = undefined;
+            ret[0] = @intFromEnum(inst.type);
+            ret[1] = @intFromEnum(inst.value);
+            switch (inst.value) {
+                .NaN => |nan| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(nan.v)),
+                .I64 => |int| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(int)),
+                .U64 => |int| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(int)),
+                .F64 => |f|   std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(f)),
+                .Str => unreachable,
+                else => {},
+            }
+            _ = try file.write(&ret);
         } else {
-            var ret: [8]u8 = undefined;
-            ret[0] = inst.type.to_bytes();
-            ret[1] = @intFromEnum(inst_mod.InstValueType.Str);
-            const place_holder: *const [6:0]u8 = "STRING";
-            std.mem.copyForwards(u8, ret[2..8], place_holder);
+            var ret: [CHUNK_SIZE]u8 = undefined;
+            ret[0] = @intFromEnum(inst.type);
+            ret[1] = @intFromEnum(inst.value);
+            const place_holder: *const [8:0]u8 = "$STRING$";
+            std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], place_holder);
             _ = try file.write(&ret);
         }
     }
@@ -87,13 +102,16 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         var program = Program.init(alloc);
 
         const file = try std.fs.cwd().readFileAlloc(alloc, file_path, 128 * 128);
+        if (file.len <= 0)
+            panic("File is empty", .{});
+
         if (file[0] < 0 or file[0] > @intFromEnum(InstType.halt))
             panic("ERROR: Failed to get type of instruction from bytes", .{});
 
         var strs = std.ArrayList([]const u8).init(alloc);
-        while (bp < file.len) : (bp += 1) {
-            if (file[bp] == ';') break;
+        while (file[bp] != ';') {
             const str_len = file[bp];
+            bp += 1;
             const str = file[bp..bp + str_len];
             bp += str_len;
             try strs.append(str);
@@ -103,21 +121,12 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         bp += 1;
 
         var str_count: usize = 0;
-        std.debug.print("{any}\n", .{file[bp..file.len]});
-        while (bp < file.len) : (bp += INST_CAP) {
-            const chunk = file[bp..bp + INST_CAP];
-            std.debug.print("{any}\n", .{chunk});
+        while (bp < file.len) : (bp += CHUNK_SIZE) {
+            const chunk = file[bp..bp + CHUNK_SIZE];
             if (chunk[1] != @intFromEnum(inst_mod.InstValueType.Str)) {
                 const inst = try Inst.from_bytes(chunk);
-                if (inst.type == .label) {
-                    if (std.mem.eql(u8, inst.value.Str, "_start"))
-                        entry_point = ip;
-
-                    try lm.put(inst.value.Str, ip);
-                }
-
                 try im.put(ip, Loc.new(68, 68, file_path));
-                try program.append(try Inst.from_bytes(chunk));
+                try program.append(inst);
             } else {
                 const inst_type: InstType = @enumFromInt(chunk[0]);
                 const inst_value = InstValue {
@@ -130,6 +139,13 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
                     .type = inst_type,
                     .value = inst_value
                 };
+
+                if (inst.type == .label) {
+                    if (std.mem.eql(u8, inst.value.Str, "_start"))
+                        entry_point = ip;
+
+                    try lm.put(inst.value.Str, ip);
+                }
 
                 try im.put(ip, Loc.new(68, 68, file_path));
                 try program.append(inst);
