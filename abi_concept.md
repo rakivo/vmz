@@ -23,6 +23,6 @@
 000000f0  00 05 00 00 00 00 00 00  f2 7f 20 04 aa aa aa aa  |.......... .....|
 00000100  aa aa aa aa 10 06 24 53  54 52 49 4e 47 24 01 04  |......$STRING$..|
 00000110  aa aa aa aa aa aa aa aa  01 04 aa aa aa aa aa aa  |................|
-00000120  aa aa 22 04 aa aa aa aa  aa aa aa aa               |..".........|
+00000120  aa aa 22 04 aa aa aa aa  aa aa aa aa              |..".........|
 0000012c
 ```
