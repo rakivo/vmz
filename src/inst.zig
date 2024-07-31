@@ -12,6 +12,9 @@ const panic     = vm_mod.panic;
 const NaNBox = nan_mod.NaNBox;
 const Type   = nan_mod.Type;
 
+pub const CHUNK_SIZE = 10;
+pub const STRING_PLACEHOLDER: *const [8:0]u8 = "$STRING$";
+
 // Note for developers: update `arg_required` and `expected_types` functions if you add a new instruction here.
 pub const InstType = enum {
     // push/pop to stack
@@ -110,7 +113,6 @@ pub const InstType = enum {
     }
 };
 
-pub const INST_CAP = 14 + 1 + 1;
 pub const None = InstValue.new(void, {});
 
 pub const InstValueType = enum {

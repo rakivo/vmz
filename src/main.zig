@@ -7,29 +7,33 @@ const NaNBox    = @import("NaNBox.zig").NaNBox;
 const Parser    = @import("parser.zig").Parser;
 const Natives   = @import("natives.zig").Natives;
 
-const Flag          = flag_mod.Flag;
-const FlagParser    = flag_mod.Parser;
+const Flag               = flag_mod.Flag;
+const FlagParser         = flag_mod.Parser;
 
-const Vm            = vm_mod.Vm;
-const panic         = vm_mod.panic;
-const InstMap       = vm_mod.InstMap;
-const Program       = vm_mod.Program;
-const LabelMap      = vm_mod.LabelMap;
+const Vm                 = vm_mod.Vm;
+const panic              = vm_mod.panic;
+const InstMap            = vm_mod.InstMap;
+const Program            = vm_mod.Program;
+const LabelMap           = vm_mod.LabelMap;
 
-const Loc           = lexer_mod.Token.Loc;
-const Lexer         = lexer_mod.Lexer;
-const report_err    = lexer_mod.Lexer.report_err;
+const Loc                = lexer_mod.Token.Loc;
+const Lexer              = lexer_mod.Lexer;
+const report_err         = lexer_mod.Lexer.report_err;
 
-const INST_CAP      = inst_mod.INST_CAP;
-const Inst          = inst_mod.Inst;
-const InstValue     = inst_mod.InstValue;
-const InstType      = inst_mod.InstType;
-const InstValueType = inst_mod.InstValueType;
+const Inst               = inst_mod.Inst;
+const InstValue          = inst_mod.InstValue;
+const CHUNK_SIZE         = inst_mod.CHUNK_SIZE;
+const STRING_PLACEHOLDER = inst_mod.STRING_PLACEHOLDER;
+const InstType           = inst_mod.InstType;
+const InstValueType      = inst_mod.InstValueType;
 
-const exit          = std.process.exit;
+const exit               = std.process.exit;
+
+const ASM_FILE_EXTENSION: []const u8 = ".asm";
+const ENTRY_POINT_NAME: []const u8 = "_start";
 
 const out_flag = Flag([]const u8, "-o", "--output", .{
-    .help = "path to bin output file",
+    .help = "path to bin output file"
 }).new();
 
 const src_flag = Flag([]const u8, "-p", "--path", .{
@@ -38,10 +42,8 @@ const src_flag = Flag([]const u8, "-p", "--path", .{
 }).new();
 
 const include_flag = Flag([]const u8, "-I", "--include", .{
-    .help = "include path",
+    .help = "include path"
 }).new();
-
-const CHUNK_SIZE = 10;
 
 fn write_program(file_path: []const u8, program: []const Inst) !void {
     const file = try std.fs.cwd().createFile(file_path, .{});
@@ -59,10 +61,11 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
     _ = try file.write(&SEMI_COLON);
 
     for (program) |inst| {
+        var ret: [CHUNK_SIZE]u8 = undefined;
+        ret[0] = @intFromEnum(inst.type);
+        ret[1] = @intFromEnum(inst.value);
+
         if (inst.value != .Str) {
-            var ret: [CHUNK_SIZE]u8 = undefined;
-            ret[0] = @intFromEnum(inst.type);
-            ret[1] = @intFromEnum(inst.value);
             switch (inst.value) {
                 .NaN => |nan| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(nan.v)),
                 .I64 => |int| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(int)),
@@ -73,10 +76,7 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
             }
             _ = try file.write(&ret);
         } else {
-            var ret: [CHUNK_SIZE]u8 = undefined;
-            ret[0] = @intFromEnum(inst.type);
-            ret[1] = @intFromEnum(inst.value);
-            const place_holder: *const [8:0]u8 = "$STRING$";
+            const place_holder: *const [8:0]u8 = STRING_PLACEHOLDER;
             std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], place_holder);
             _ = try file.write(&ret);
         }
@@ -84,7 +84,7 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
 }
 
 fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *FlagParser) !Parser.Parsed {
-    return if (std.mem.endsWith(u8, file_path, ".asm")) {
+    return if (std.mem.endsWith(u8, file_path, ASM_FILE_EXTENSION)) {
         var lexer = Lexer.init(file_path, alloc, flag_parser.parse(include_flag));
         defer lexer.deinit();
 
@@ -141,7 +141,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
                 };
 
                 if (inst.type == .label) {
-                    if (std.mem.eql(u8, inst.value.Str, "_start"))
+                    if (std.mem.eql(u8, inst.value.Str, ENTRY_POINT_NAME))
                         entry_point = ip;
 
                     try lm.put(inst.value.Str, ip);
