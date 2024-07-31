@@ -74,12 +74,12 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
                 .Str => unreachable,
                 else => {},
             }
-            _ = try file.write(&ret);
         } else {
             const place_holder: *const [8:0]u8 = STRING_PLACEHOLDER;
             std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], place_holder);
-            _ = try file.write(&ret);
         }
+
+        _ = try file.write(&ret);
     }
 }
 

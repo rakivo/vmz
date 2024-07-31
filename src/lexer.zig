@@ -173,6 +173,7 @@ pub const Lexer = struct {
                 _ = iter.next().?;
             }
 
+            // Collect tokens from current line.
             const name = words[0].str[1..words[0].str.len];
             var pp_tokens = try std.ArrayList(PpToken).initCapacity(self.alloc, words.len - 1);
             for (words[1..]) |t| {
@@ -219,6 +220,7 @@ pub const Lexer = struct {
                 _ = iter.next();
                 row.* += 1;
 
+                // Body is empty
                 if (body_str.items.len == 0) {
                     try self.macro_map.put(name, .{
                         .multi = .{
@@ -232,7 +234,6 @@ pub const Lexer = struct {
 
                 var body = TokensArrayList.init(self.alloc);
                 for (body_str.items) |l| {
-                    defer row.* += 1;
                     var idx: usize = 0;
                     var new_words = std.ArrayList(Token).init(self.alloc);
                     const splitted = try split_whitespace(l, self.alloc);
@@ -262,6 +263,7 @@ pub const Lexer = struct {
                         try new_words.append(pp);
                     }
 
+                    row.* += 1;
                     try body.append(new_words.items);
                 }
 
@@ -277,14 +279,11 @@ pub const Lexer = struct {
                 while (idx < pp_tokens.items.len) : (idx += 1) {
                     const w = pp_tokens.items[idx];
                     const loc = Token.Loc.new(w.loc.row -% 1, w.loc.col, w.loc.file_path);
+
+                    // Found another macro in this macro.
                     if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
                         if (w.str.len == 1)
                             return report_err(w.loc, error.UNEXPECTED_EOF);
-
-                        var it = self.macro_map.iterator();
-                        while (it.next()) |e| {
-                            print("{s} : {}\n", .{e.key_ptr.*, e.value_ptr.*});
-                        }
 
                         if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
                             switch (macro) {
@@ -297,6 +296,8 @@ pub const Lexer = struct {
                         }
 
                         continue;
+
+                    // Handle string literals.
                     } else if (std.mem.startsWith(u8, w.str, "\"")) {
                         var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, w.str.len);
                         defer strs.deinit();
@@ -323,69 +324,15 @@ pub const Lexer = struct {
     }
 
     fn type_token_light(str: []const u8) Token.Type {
-        return if (std.mem.startsWith(u8, str, "\"")) .str
-        else if (std.mem.startsWith(u8, str, "'"))    .char
-        else if (std.mem.startsWith(u8, str, "-"))    .int
+        return if (std.mem.startsWith(u8, str, "\""))                     .str
+        else if (std.mem.startsWith(u8, str, "'"))                        .char
+        else if (std.mem.startsWith(u8, str, "-"))                        .int
         else if (std.ascii.isDigit(str[0])) {
             return if (std.mem.indexOf(u8, str, ".") != null)
-                                                      .float
+                                                                          .float
             else
-                                                      .int;
-        } else                                        .literal;
-    }
-
-    fn type_token(self: *Self, idx: *u64, row: u32,
-                  line_tokens: *std.ArrayList(Token), words: []const Ss) !Token.Type
-    {
-        const word = words[idx.*];
-        if (std.mem.startsWith(u8, word.str, "\"")) {
-            var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, word.str.len);
-            defer strs.deinit();
-            while (true) : (idx.* += 1) {
-                if (idx.* >= words.len)
-                    return Error.NO_CLOSING_QUOTE;
-
-                try strs.append(words[idx.*].str);
-                if (std.mem.endsWith(u8, words[idx.*].str, "\"")) break;
-            }
-
-            var str = try std.mem.join(self.alloc, " ", strs.items);
-            str = str[1..str.len - 1];
-            const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
-            try line_tokens.append(t);
-        }
-
-        if (std.mem.startsWith(u8, word.str, "'")) {
-            if (!std.mem.endsWith(u8, word.str, "'"))
-                return Error.INVALID_CHAR;
-
-            if (word.str.len != 3)
-                return Error.INVALID_CHAR;
-
-            const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str[1..2]);
-            try line_tokens.append(t);
-            idx.* += 1;
-        }
-
-        if (std.mem.startsWith(u8, word.str, "-")) {
-            if (word.str.len < 2)
-                return error.UNEXPECTED_EOF;
-
-            if (!std.ascii.isDigit(word.str[1]))
-                return error.INVALID_LITERAL;
-
-            return if (std.mem.indexOf(u8, word.str[1..word.str.len], ".") != null)
-                .float
-            else
-                .int;
-        }
-
-        return if (std.ascii.isDigit(word.str[0])) {
-            return if (std.mem.indexOf(u8, word.str, ".")) |_|
-                .float
-            else
-                .int;
-        } else .literal;
+                                                                          .int;
+        } else                                                            .literal;
     }
 
     fn type_pp_token(_: *Self, str: []const u8) !Token.Type {
@@ -594,9 +541,56 @@ pub const Lexer = struct {
                     }
                 }
 
-                const ty = self.type_token(&idx, row, &line_tokens, words) catch |err| {
-                    return report_err(Token.Loc.new(row, word.s, self.file_path), err);
-                };
+                var ty: Token.Type = undefined;
+                if (std.mem.startsWith(u8, word.str, "\"")) {
+                    var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, word.str.len);
+                    defer strs.deinit();
+                    while (true) : (idx += 1) {
+                        if (idx >= words.len)
+                            return report_err(Token.Loc.new(row, word.s, self.file_path), error.NO_CLOSING_QUOTE);
+
+                        try strs.append(words[idx].str);
+                        if (std.mem.endsWith(u8, words[idx].str, "\"")) break;
+                    }
+
+                    var str = try std.mem.join(self.alloc, " ", strs.items);
+                    str = str[1..str.len - 1];
+                    const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
+                    try line_tokens.append(t);
+                }
+
+                if (std.mem.startsWith(u8, word.str, "'")) {
+                    if (!std.mem.endsWith(u8, word.str, "'"))
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.INVALID_CHAR);
+
+                    if (word.str.len != 3)
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.INVALID_CHAR);
+
+                    const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str[1..2]);
+                    try line_tokens.append(t);
+                    idx += 1;
+                }
+
+                if (std.mem.startsWith(u8, word.str, "-")) {
+                    if (word.str.len < 2)
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_EOF);
+
+                    if (!std.ascii.isDigit(word.str[1]))
+                        return report_err(Token.Loc.new(row, word.s, self.file_path), error.INVALID_LITERAL);
+
+                    ty = if (std.mem.indexOf(u8, word.str[1..word.str.len], ".") != null)
+                        .float
+                    else
+                        .int;
+                }
+
+                if (std.ascii.isDigit(word.str[0])) {
+                    ty = if (std.mem.indexOf(u8, word.str, ".") != null)
+                        .float
+                    else
+                        .int;
+                } else ty = .literal;
+
                 const t = Token.new(ty, Token.Loc.new(row, word.s, self.file_path), word.str);
                 try line_tokens.append(t);
             }
