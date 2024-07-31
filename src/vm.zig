@@ -567,7 +567,7 @@ pub const Vm = struct {
                     .Str => |str| str,
                     else => return error.INVALID_TYPE,
                 };
-                const ptro = self.natives.get(name);
+                const ptro = self.natives.map.get(name);
                 if (ptro) |ptr| {
                     try ptr(self);
                 } else {

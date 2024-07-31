@@ -167,7 +167,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var natives = Natives.init(arena.allocator());
+    var natives = Natives.init(arena.allocator(), .{});
 
     var flag_parser = try FlagParser.init(arena.allocator());
     defer flag_parser.deinit();

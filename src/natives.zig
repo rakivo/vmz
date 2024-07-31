@@ -1,55 +1,36 @@
 const std = @import("std");
-const Vm  = @import("vm.zig").Vm;
+const vm  = @import("vm.zig");
+
+const Vm = vm.Vm;
+const panic = vm.panic;
+
+const print = std.debug.print;
 
 pub const Natives = struct {
-    const REQUIRED_SIGNATURE = *const fn (*Vm) anyerror!void;
+    const REQUIRED_SIGNATURE = fn (*Vm) anyerror!void;
 
-    map: std.StringHashMap(REQUIRED_SIGNATURE),
+    map: std.StringHashMap(*const REQUIRED_SIGNATURE),
 
     const Self = @This();
 
-    // const ARGS_CAP = 256;
+    pub fn init(alloc: std.mem.Allocator, comptime obj: anytype) Self {
+        var map = std.StringHashMap(*const REQUIRED_SIGNATURE).init(alloc);
 
-    pub inline fn init(alloc: std.mem.Allocator) Self {
-        return .{
-            .map = std.StringHashMap(REQUIRED_SIGNATURE).init(alloc)
-        };
+        const info = @typeInfo(@TypeOf(obj));
+        inline for (info.Struct.fields) |field| {
+            const field_value = @field(obj, field.name);
+            const signature = @TypeOf(field_value);
+
+            if (signature != REQUIRED_SIGNATURE)
+                @compileError("Signature: " ++ signature ++ " does not match required signature: " ++ REQUIRED_SIGNATURE ++ "\n");
+
+            map.put(field.name, field_value);
+        }
+
+        return .{.map = map};
     }
 
     pub inline fn deinit(self: *Self) void {
         self.map.deinit();
-    }
-
-    pub inline fn get(self: *const Self, key: []const u8) ?REQUIRED_SIGNATURE {
-        return self.map.get(key);
-    }
-
-    pub inline fn append(self: *Self, comptime name: []const u8, comptime ptr: REQUIRED_SIGNATURE) !void {
-        try self.map.put(name, ptr);
-
-        // const obj_type = @TypeOf(obj);
-
-        // comptime var n = 0;
-        // comptime var names: [ARGS_CAP][:0]const u8 = undefined;
-        // comptime var ptrs: [ARGS_CAP]REQUIRED_SIGNATURE = undefined;
-
-        // comptime {
-        //     const fields = @typeInfo(obj_type).Struct.fields;
-        //     if (fields.len > ARGS_CAP)
-        //         @compileError("Amount of arguments is greater than the maximum capacity");
-
-        //     for (fields) |f| {
-        //         const info = @typeInfo(f.type);
-        //         if (info != .Fn)
-        //             @compileError("Expected argument to be a function");
-
-        //         names[n] = f.name;
-        //         ptrs[n] = @field(obj, f.name);
-        //         n += 1;
-        //     }
-        // }
-
-        // for (0..n) |i|
-        //     try self.map.put(names[i], ptrs[i]);
     }
 };
