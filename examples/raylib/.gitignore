@@ -1,2 +1,5 @@
 *.o
-vmz
+*.bin
+vm
+build
+raylib_example

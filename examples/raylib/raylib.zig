@@ -1,4 +1,10 @@
-const Vm = @import("vmz.zig").Vm;
+const std = @import("std");
+const vmz = @import("vmz/vmz.zig");
+const Vm = vmz.vm.Vm;
+
+const raylib = @cImport(@cInclude("raylib.h"));
+
+const NaNBox = vmz.NaNBox;
 
 pub fn init_window(vm: *Vm) anyerror!void {
     const str_len = vm.stack.popBack().?.as(u64);
@@ -29,7 +35,7 @@ pub fn end_drawing(_: *Vm) anyerror!void {
     raylib.EndDrawing();
 }
 
-pub fn color_from_u64(v: u64) raylib.Color {
+fn color_from_u64(v: u64) raylib.Color {
     return raylib.Color {
         .r = @intCast((v >> 16) & 0xFF),
         .g = @intCast((v >> 8) & 0xFF),
