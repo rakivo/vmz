@@ -37,10 +37,17 @@ pub const Parser = struct {
             .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.str)),
             .char => return Inst.new(ty, InstValue.new(u8, operand_str.str[0])),
             .int => {
-                const int = std.fmt.parseInt(i64, operand_str.str, 10) catch |err| {
-                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
-                    return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
-                };
+                const int = if (std.mem.startsWith(u8, operand_str.str, "0x"))
+                    std.fmt.parseInt(i64, operand_str.str[2..], 16) catch |err| {
+                        std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
+                        return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
+                    }
+                else
+                    std.fmt.parseInt(i64, operand_str.str, 10) catch |err| {
+                        std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
+                        return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
+                    };
+
                 if (int >= 0) {
                     if (ty == .push) {
                         return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(u64, @intCast(int))));

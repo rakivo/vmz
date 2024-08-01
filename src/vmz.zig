@@ -67,16 +67,16 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
 
         if (inst.value != .Str) {
             switch (inst.value) {
-                .NaN => |nan| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(nan.v)),
-                .I64 => |int| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(int)),
-                .U64 => |int| std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(int)),
-                .F64 => |f|   std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], &std.mem.toBytes(f)),
+                .NaN => |nan| std.mem.copyForwards(u8, ret[2..], &std.mem.toBytes(nan.v)),
+                .I64 => |int| std.mem.copyForwards(u8, ret[2..], &std.mem.toBytes(int)),
+                .U64 => |int| std.mem.copyForwards(u8, ret[2..], &std.mem.toBytes(int)),
+                .F64 => |f|   std.mem.copyForwards(u8, ret[2..], &std.mem.toBytes(f)),
                 .Str => unreachable,
                 else => {},
             }
         } else {
             const place_holder: *const [8:0]u8 = STRING_PLACEHOLDER;
-            std.mem.copyForwards(u8, ret[2..CHUNK_SIZE], place_holder);
+            std.mem.copyForwards(u8, ret[2..], place_holder);
         }
 
         _ = try file.write(&ret);
@@ -165,23 +165,20 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
     };
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var natives = Natives.init(arena.allocator(), .{});
-
-    var flag_parser = try FlagParser.init(arena.allocator());
+pub fn init(allocator: std.mem.Allocator, natives: *Natives) !void {
+    var flag_parser = try FlagParser.init(allocator);
     defer flag_parser.deinit();
 
     const file_path = flag_parser.parse(src_flag).?;
 
-    var parsed = try get_program(file_path, arena.allocator(), &flag_parser);
+    var parsed = try get_program(file_path, allocator, &flag_parser);
     defer parsed.deinit();
 
     if (flag_parser.parse(out_flag)) |file_path_| {
         try write_program(file_path_, parsed.program.items);
     }
 
-    var vm = try Vm.init(&parsed, &natives, arena.allocator());
+    var vm = try Vm.init(&parsed, &natives, allocator);
     defer vm.deinit();
 
     try vm.execute_program();

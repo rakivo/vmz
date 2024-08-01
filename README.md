@@ -29,4 +29,9 @@ _start:
     push @B
 }
 ```
-> Unfortunately, you can not expand other multi-line macro (with curly braces) for now, as I didn't add support for that, but you can always send me a PR, I will deeply appreciate any help!
+
+> You can also see an example of using [raylib](https://github.com/raysan5/raylib) in `asm/raylib.asm`
+
+### Credits:
+- raylib: <https://github.com/raysan5/raylib>
+- modded vec deque: <https://github.com/magurotuna/zig-deque>

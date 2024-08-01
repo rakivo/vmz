@@ -14,4 +14,4 @@ fi
 
 set -xe
 
-zig build-exe $FLAGS src/main.zig --name $NAME --cache-dir $CACHE_DIR
+zig build-lib $FLAGS src/vmz.zig --name $NAME --cache-dir $CACHE_DIR

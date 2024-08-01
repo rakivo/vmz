@@ -174,7 +174,7 @@ pub const Lexer = struct {
             }
 
             // Collect tokens from current line.
-            const name = words[0].str[1..words[0].str.len];
+            const name = words[0].str[1..];
             var pp_tokens = try std.ArrayList(PpToken).initCapacity(self.alloc, words.len - 1);
             for (words[1..]) |t| {
                 try pp_tokens.append(.{
@@ -245,7 +245,7 @@ pub const Lexer = struct {
                             if (w.str.len == 1)
                                 return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNEXPECTED_EOF);
 
-                            if (self.macro_map.get(std.mem.trim(u8, w.str[1..w.str.len], " "))) |macro| {
+                            if (self.macro_map.get(std.mem.trim(u8, w.str[1..], " "))) |macro| {
                                 try self.handle_macro(macro, row.*, &idx, &new_words, words);
                                 continue;
                             } else {
@@ -557,6 +557,7 @@ pub const Lexer = struct {
                     str = str[1..str.len - 1];
                     const t = Token.new(.str, Token.Loc.new(row, word.s, self.file_path), str);
                     try line_tokens.append(t);
+                    continue;
                 }
 
                 if (std.mem.startsWith(u8, word.str, "'")) {

@@ -1,35 +1,34 @@
-const std      = @import("std");
-const builtin  = @import("builtin");
-const inst_mod = @import("inst.zig");
-const flag_mod = @import("flags.zig");
-const lexer    = @import("lexer.zig");
-const Heap     = @import("heap.zig").Heap;
-const Trap     = @import("trap.zig").Trap;
-const NaNBox   = @import("NaNBox.zig").NaNBox;
-const Natives  = @import("natives.zig").Natives;
-const VecDeque = @import("VecDeque.zig").VecDeque;
-const Parsed   = @import("parser.zig").Parser.Parsed;
+const std       = @import("std");
+const builtin   = @import("builtin");
+const inst_mod  = @import("inst.zig");
+const flag_mod  = @import("flags.zig");
+const lexer_mod = @import("lexer.zig");
+const Heap      = @import("heap.zig").Heap;
+const NaNBox    = @import("NaNBox.zig").NaNBox;
+const Natives   = @import("natives.zig").Natives;
+const VecDeque  = @import("VecDeque.zig").VecDeque;
+const Parsed    = @import("parser.zig").Parser.Parsed;
 
-const Inst = inst_mod.Inst;
+const Inst      = inst_mod.Inst;
 const InstValue = inst_mod.InstValue;
 
-const Loc = lexer.Token.Loc;
+const Loc       = lexer_mod.Token.Loc;
 
-const Flag  = flag_mod.Flag;
-const Flags = flag_mod.Flags;
+const Flag      = flag_mod.Flag;
+const Flags     = flag_mod.Flags;
 
-const print  = std.debug.print;
-const exit   = std.process.exit;
-const assert = std.debug.assert;
+const print     = std.debug.print;
+const exit      = std.process.exit;
+const assert    = std.debug.assert;
 
-const rstdin = std.io.getStdOut().reader();
-const wstdin = std.io.getStdOut().writer();
+const rstdin    = std.io.getStdOut().reader();
+const wstdin    = std.io.getStdOut().writer();
 
-const rstdout = std.io.getStdOut().reader();
-const wstdout = std.io.getStdOut().writer();
+const rstdout   = std.io.getStdOut().reader();
+const wstdout   = std.io.getStdOut().writer();
 
-const rstderr = std.io.getStdOut().reader();
-const wstderr = std.io.getStdOut().writer();
+const rstderr   = std.io.getStdOut().reader();
+const wstderr   = std.io.getStdOut().writer();
 
 pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
@@ -173,6 +172,31 @@ pub const Vm = struct {
         return if (get_int(inst)) |some| @intCast(some) else null;
     }
 
+    // This function will work properly ONLY if bytes of the string is the last element on the stack.
+    // For example here it will work: `[..., 114, 97, 107, 105, 118, 111, Str size: 6]`,
+    // And here it won't: `[114, 97, 107, 105, 118, 111, Str size: 6, ...]`,
+    pub fn get_str(self: *Self, str_len: usize, is_length_on_stack: bool) []const u8 {
+        const stack_len = self.stack.len();
+        var str: [STR_CAP + 1]u8 = undefined;
+        const start = if (is_length_on_stack)
+            stack_len - 1 - str_len
+        else
+            stack_len - str_len;
+
+        const end = if (is_length_on_stack)
+            stack_len - 1
+        else
+            stack_len;
+
+        const nans = self.stack.buf[start..end];
+
+        var i: usize = 0;
+        while (i < nans.len) : (i += 1)
+            str[i] = nans[i].as(u8);
+
+        return str[0..end - 2];
+    }
+
     fn print_value(self: *Self, v: *const NaNBox, newline: bool) !void {
         switch (v.getType()) {
             .U8 => {
@@ -196,7 +220,7 @@ pub const Vm = struct {
             .Str => if (self.stack.len() > v.as(u64)) {
                 const len = v.as(u64);
                 const stack_len = self.stack.len();
-                const nans = self.stack.buf[stack_len - 1 - len..stack_len];
+                const nans = self.stack.buf[stack_len - 1 - len..];
                 var str: [STR_CAP + 1]u8 = undefined;
                 var i: usize = 0;
                 while (i < nans.len) : (i += 1)
@@ -385,9 +409,9 @@ pub const Vm = struct {
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
                         const buf = try switch (nan.as(u64)) {
-                            1 => rstdin.readUntilDelimiter(self.memory[self.mp..MEMORY_CAP], '\n'),
-                            2 => rstdout.readUntilDelimiter(self.memory[self.mp..MEMORY_CAP], '\n'),
-                            3 => rstderr.readUntilDelimiter(self.memory[self.mp..MEMORY_CAP], '\n'),
+                            1 => rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            2 => rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            3 => rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
                             else => return error.INVALID_FD,
                         };
 
@@ -400,12 +424,12 @@ pub const Vm = struct {
                     .Str => {
                         const len = nan.as(u64);
                         const stack_len = self.stack.len();
-                        const nans = self.stack.buf[stack_len - len - 1..stack_len];
+                        const nans = self.stack.buf[stack_len - len - 1..];
                         var str: [STR_CAP]u8 = undefined;
                         for (nans, 0..) |nan_, i|
                             str[i] = nan_.as(u8);
 
-                        const n = std.fs.cwd().readFile(str[0..len], self.memory[self.mp..self.memory.len]) catch |err| {
+                        const n = std.fs.cwd().readFile(str[0..len], self.memory[self.mp..]) catch |err| {
                             print("ERROR: Failed to read file `{s}`: {}\n", .{str[0..len], err});
                             return error.FAILED_TO_READ_FILE;
                         };
@@ -571,11 +595,14 @@ pub const Vm = struct {
                 if (ptro) |ptr| {
                     try ptr(self);
                 } else {
+                    print("Undefined native function: {s}\n", .{name});
                     if (self.natives.map.count() > 0) {
                         var it = self.natives.map.keyIterator();
-                        print("Names of natives provided: {s}\n", .{it.next().?.*});
+                        print("Names of natives provided: {s}", .{it.next().?.*});
                         while (it.next()) |key|
-                            print(", {s}\n", .{key.*});
+                            print(", {s}", .{key.*});
+
+                        print("\n", .{});
                     }
                     return error.UNDEFINED_SYMBOL;
                 }
