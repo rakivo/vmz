@@ -25,12 +25,16 @@ _start:
 
 #B @C
 
-#A {
+#A x {
+    push x
     push @B
 }
+
+_start:
+    @A @C
 ```
 
-> You can also see an example of using [raylib](https://github.com/raysan5/raylib) in `asm/raylib.asm`
+> You can also see an example of using [raylib](https://github.com/raysan5/raylib) in (examples/raylib)[https://github.com/rakivo/vmz/tree/master/examples/raylib]
 
 ### Credits:
 - raylib: <https://github.com/raysan5/raylib>

@@ -1,5 +1,7 @@
 *.o
 *.bin
+
 vm
+!vmz
 build
 raylib_example

@@ -1,0 +1,3 @@
+ffi.zig
+main.c
+build.sh
