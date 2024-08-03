@@ -183,6 +183,7 @@ pub const Lexer = struct {
                 var idx_: usize = 0;
                 while (idx_ < pp_tokens.items.len) : (idx_ += 1) {
                     const pp = pp_tokens.items[idx_];
+
                     if (std.mem.eql(u8, pp.str, "{")) break;
                     if (!std.ascii.isAlphabetic(pp.str[0])) {
                         std.debug.print("ERROR: arg's name: {s} can must be alphabetic\n", .{pp.str});
@@ -232,24 +233,8 @@ pub const Lexer = struct {
                     const splitted = try split_whitespace(l, self.alloc);
                     while (idx < splitted.len) : (idx += 1) {
                         const w = splitted[idx];
-
-                        // Found another macro in this macro
-                        if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
-                            if (w.str.len == 1)
-                                return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNEXPECTED_EOF);
-
-                            if (self.macro_map.get(std.mem.trim(u8, w.str[1..], " "))) |macro| {
-                                try self.handle_macro(macro, row.*, &idx, &new_words, words);
-                                continue;
-                            } else {
-                                print("ERROR: undefined macro: {s}\n", .{w.str});
-                                return report_err(Token.Loc.new(row.*, w.s, self.file_path), error.UNDEFINED_MACRO);
-                            }
-                        }
-
-                        const ty = try self.type_pp_token(w.str);
                         const pp = Token {
-                            .type = ty,
+                            .type = try self.type_pp_token(w.str),
                             .str = w.str,
                             .loc = Token.Loc.new(row.*, w.s, self.file_path)
                         };
@@ -351,7 +336,8 @@ pub const Lexer = struct {
     }
 
     fn handle_macro(self: *Self, macro: Macro, row: u32, idx: *usize,
-                    line_tokens: *std.ArrayList(Token), words: []const Ss) !void
+                    line_tokens: *std.ArrayList(Token), words: []const Ss,
+                    nargs_map: ?std.StringHashMap(Ss)) !void
     {
         const word = words[idx.*];
         switch (macro) {
@@ -383,6 +369,8 @@ pub const Lexer = struct {
                 while (idx.* < words.len) : (idx.* += 1) {
                     const str = words[idx.*].str;
 
+                    if (std.mem.eql(u8, str, "{")) break;
+
                     // Handle string literals
                     if (std.mem.startsWith(u8, str, "\"")) {
                         defer count += 1;
@@ -408,19 +396,30 @@ pub const Lexer = struct {
                         continue;
                     }
 
+                    if (nargs_map) |map| {
+                        if (map.get(str)) |some| {
+                            try args_map.put(pp.args[count].str, some);
+                            continue;
+                        }
+                    }
+
                     const loc = Token.Loc.new(row, word.s, self.file_path);
                     if (count >= pp.args.len or args_map.unmanaged.size > pp.args.len) {
                         print("ERROR: too many arguments for macro `{s}`, expected: {d}\n", .{word.str, pp.args.len});
-                        return report_err(loc , error.TOO_MANY_ARGUMENTS);
+                        const loc_ = Token.Loc {
+                            .row = row - 1,
+                            .col = word.s,
+                            .file_path = self.file_path
+                        };
+                        return report_err(loc_, error.TOO_MANY_ARGUMENTS);
                     }
 
-                    const wss = if (std.mem.indexOf(u8, str, ",") != null or std.mem.indexOf(u8, str, "\"") != null)
-                        Ss {
-                            .s = words[idx.*].s,
-                            .str = std.mem.trim(u8, str, ",")
-                        }
-                    else
-                        words[idx.*];
+                    const wss = if (std.mem.indexOf(u8, str, ",") != null or
+                                    std.mem.indexOf(u8, str, "\"") != null)
+                    Ss {
+                        .s = words[idx.*].s,
+                        .str = std.mem.trim(u8, str, ",")
+                    } else words[idx.*];
 
                     if (std.mem.startsWith(u8, wss.str, MACRO_SYMBOL)) {
                         if (wss.str.len == 1)
@@ -428,18 +427,15 @@ pub const Lexer = struct {
 
                         if (self.macro_map.get(std.mem.trim(u8, wss.str[1..wss.str.len], " "))) |new_macro| {
                             var macro_tokens = std.ArrayList(Token).init(self.alloc);
-                            try self.handle_macro(new_macro, row, idx, &macro_tokens, words);
+                            try self.handle_macro(new_macro, row, idx, &macro_tokens, words, args_map);
 
-                            const wss_ = if (macro_tokens.items.len > 0)
-                                Ss {
-                                    .s = macro_tokens.items[0].loc.col,
-                                    .str = macro_tokens.items[0].str,
-                                }
-                            else
-                                Ss {
-                                    .s = wss.s,
-                                    .str = "",
-                                };
+                            const wss_ = if (macro_tokens.items.len > 0) Ss {
+                                .s = macro_tokens.items[0].loc.col,
+                                .str = macro_tokens.items[0].str
+                            } else Ss {
+                                .s = wss.s,
+                                .str = ""
+                            };
 
                             try args_map.put(pp.args[count].str, wss_);
                             continue;
@@ -454,9 +450,31 @@ pub const Lexer = struct {
                 }
 
                 for (pp.body) |pp_line| {
+                    var idx_: usize = 0;
                     var expansion = try std.ArrayList(Token).initCapacity(self.alloc, pp_line.len);
-                    for (pp_line) |pp_t| {
-                        if (args_map.get(pp_t.str)) |v| {
+                    while (idx_ < pp_line.len) : (idx_ += 1) {
+                        const pp_t = pp_line[idx_];
+                        if (std.mem.startsWith(u8, pp_t.str, MACRO_SYMBOL)) {
+                            if (pp_t.str.len == 1)
+                                return report_err(pp_t.loc, error.UNEXPECTED_EOF);
+
+                            if (self.macro_map.get(std.mem.trim(u8, pp_t.str[1..pp_t.str.len], " "))) |macro_| {
+                                // TODO: Generalize Tokens and []const Ss
+                                var ss = try std.ArrayList(Ss).initCapacity(self.alloc, pp_line.len);
+                                defer ss.deinit();
+                                for (pp_line) |p|
+                                    try ss.append(Ss {
+                                        .s = p.loc.col,
+                                        .str = p.str,
+                                    });
+
+                                try self.handle_macro(macro_, row, &idx_, &expansion, ss.items, args_map);
+                                continue;
+                            } else {
+                                print("ERROR: undefined macro: {s}\n", .{pp_t.str});
+                                return report_err(pp_t.loc, error.UNDEFINED_MACRO);
+                            }
+                        } else if (args_map.get(pp_t.str)) |v| {
                             const t = Token.new(type_token_light(v.str), .{
                                 .row = row,
                                 .col = v.s,
@@ -530,7 +548,7 @@ pub const Lexer = struct {
                         return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_EOF);
 
                     if (self.macro_map.get(std.mem.trim(u8, word.str[1..word.str.len], " "))) |macro| {
-                        try self.handle_macro(macro, row, &idx, &line_tokens, words);
+                        try self.handle_macro(macro, row, &idx, &line_tokens, words, null);
                         continue;
                     } else {
                         print("ERROR: undefined macro: {s}\n", .{word.str});

@@ -21,13 +21,17 @@ _start:
 ```
 > After `#` you specify a name of the macro, everything that goes after the name and before `{` will be interpreted as arguments, you can use those arguments in the body of the macro, which is specified by curly braces. You can also expand other macros in your macro as in here:
 ```asm
+#"std.asm"
+
+#D 69
+
 #C 420
 
-#B @C
+#B @D
 
 #A x {
-    push x
-    push @B
+    @print x
+    @print @B
 }
 
 _start:
