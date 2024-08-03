@@ -174,28 +174,28 @@ pub const Vm = struct {
         return if (get_int(inst)) |some| @intCast(some) else null;
     }
 
-    // This function will work properly ONLY if bytes of the string is the last element on the stack.
-    // For example here it will work: `[..., 114, 97, 107, 105, 118, 111, Str size: 6]`,
-    // And here it won't: `[114, 97, 107, 105, 118, 111, Str size: 6, ...]`,
-    pub fn get_str(self: *Self, str_len: usize, is_length_on_stack: bool) []const u8 {
-        const stack_len = self.stack.len();
-        var str: [STR_CAP + 1]u8 = undefined;
-        const start = if (is_length_on_stack)
-            stack_len - 1 - str_len
-        else
-            stack_len - str_len;
+    // // This function will work properly ONLY if bytes of the string is the last element on the stack.
+    // // For example here it will work: `[..., 114, 97, 107, 105, 118, 111, Str size: 6]`,
+    // // And here it won't: `[114, 97, 107, 105, 118, 111, Str size: 6, ...]`,
+    // pub fn get_str(self: *Self, str_len: usize, is_length_on_stack: bool) []const u8 {
+    //     const stack_len = self.stack.len();
+    //     var str: [STR_CAP + 1]u8 = undefined;
+    //     var start: usize = undefined;
+    //     var end: usize = undefined;
+    //     if (is_length_on_stack) {
+    //         end = stack_len - 1;
+    //         start = stack_len - 1 - str_len;
+    //     } else {
+    //         start = stack_len - str_len;
+    //         end = stack_len;
+    //     }
 
-        const end = if (is_length_on_stack)
-            stack_len - 1
-        else
-            stack_len;
+    //     const nans = self.stack.buf[start..end];
+    //     for (0..nans.len) |i|
+    //         str[i] = nans[i].as(u8);
 
-        const nans = self.stack.buf[start..end];
-        for (0..nans.len) |i|
-            str[i] = nans[i].as(u8);
-
-        return str[0..end - 2];
-    }
+    //     return str[0..end - 2];
+    // }
 
     fn print_value(self: *Self, v: *const NaNBox, newline: bool) void {
         switch (v.getType()) {
