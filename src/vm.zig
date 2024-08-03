@@ -48,8 +48,8 @@ pub const Vm = struct {
     flags: Flags = Flags.new(),
 
     ip: u64,
-    lm: *const LabelMap,
-    im: *const InstMap,
+    lm: LabelMap,
+    im: InstMap,
     natives: *const Natives,
     program: []const Inst,
     alloc: std.mem.Allocator,

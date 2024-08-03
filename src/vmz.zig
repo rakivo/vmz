@@ -172,7 +172,7 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
 
     const file_path = flag_parser.parse(src_flag).?;
 
-    var parsed = try get_program(file_path, allocator, &flag_parser);
+    const parsed = try get_program(file_path, allocator, &flag_parser);
 
     if (flag_parser.parse(out_flag)) |file_path_|
         try write_program(file_path_, parsed.program.items);
