@@ -49,7 +49,6 @@
 
 (defconst masm-highlights
   `((,(regexp-opt masm-instructions 'symbols) . font-lock-keyword-face)
-    ("#[^\"\n]*" . font-lock-preprocessor-face)
     ("#[[:word:]_]+" . font-lock-preprocessor-face)
     ("@[[:word:]_]+" . font-lock-preprocessor-face)
     ("[[:word:]_]+:" . font-lock-constant-face)))
