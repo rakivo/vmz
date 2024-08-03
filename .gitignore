@@ -1,9 +1,10 @@
 *.o
-*.a
 *.py
 *.bin
 *.java
 *.data
+libvmz.a
+test.zig
 readme.md
 FlameGraph
 

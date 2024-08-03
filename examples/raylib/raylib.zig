@@ -93,3 +93,8 @@ pub fn draw_text(vm: *Vm) anyerror!void {
 
     raylib.DrawText(@ptrCast(str.items), x, y, size, color);
 }
+
+pub fn window_should_close(vm: *Vm) anyerror!void {
+    const b: bool = raylib.WindowShouldClose();
+    try vm.stack.pushBack(NaNBox.from(bool, b));
+}

@@ -30,6 +30,7 @@ const InstValueType      = inst.InstValueType;
 
 const exit               = std.process.exit;
 
+const SECTION_SEPARATOR: [1]u8 = [1]u8{';'};
 const ASM_FILE_EXTENSION: []const u8 = ".asm";
 const ENTRY_POINT_NAME: []const u8 = "_start";
 
@@ -58,8 +59,7 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
         _ = try file.write(str);
     }
 
-    const SEMI_COLON = [1]u8{';'};
-    _ = try file.write(&SEMI_COLON);
+    _ = try file.write(&SECTION_SEPARATOR);
 
     for (program) |inst_| {
         var ret: [CHUNK_SIZE]u8 = undefined;
@@ -110,7 +110,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
             panic("ERROR: Failed to get type of instruction from bytes", .{});
 
         var strs = std.ArrayList([]const u8).init(alloc);
-        while (file[bp] != ';') {
+        while (file[bp] != SECTION_SEPARATOR[0]) {
             const str_len = file[bp];
             bp += 1;
             const str = file[bp..bp + str_len];
@@ -118,7 +118,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
             try strs.append(str);
         }
 
-        // Skip ';'
+        // Skip the SECTION_SEPARATOR
         bp += 1;
 
         var str_count: usize = 0;
@@ -158,7 +158,7 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         return Parser.Parsed {
             .lm = lm,
             .im = im,
-            .ip = if (entry_point) |e| e else {
+            .ip = entry_point orelse {
                 return report_err(Loc.new(68, 68, file_path), Parser.Error.NO_ENTRY_POINT);
             },
             .program = program,
@@ -173,10 +173,9 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
     const file_path = flag_parser.parse(src_flag).?;
 
     var parsed = try get_program(file_path, allocator, &flag_parser);
-    defer parsed.deinit();
 
     if (flag_parser.parse(out_flag)) |file_path_|
         try write_program(file_path_, parsed.program.items);
 
-    return try Vm.init(&parsed, natives, allocator);
+    return try Vm.init(parsed, natives, allocator);
 }

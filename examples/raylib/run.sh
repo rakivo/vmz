@@ -6,7 +6,7 @@ CACHE_DIR="build"
 
 printf "Building..\n"
 
-set -x
+set -xe
 
 zig build-exe main.zig $FLAGS --name $NAME --cache-dir $CACHE_DIR
 

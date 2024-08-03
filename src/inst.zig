@@ -33,7 +33,7 @@ pub const InstType = enum {
 
     inc, dec,
 
-    jmp, je, jne, jg, jl, jle, jge,
+    jmp, jmp_if, je, jne, jg, jl, jle, jge,
 
     swap, dup,
 

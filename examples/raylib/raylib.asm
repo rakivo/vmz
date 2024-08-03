@@ -43,4 +43,7 @@ _start:
 
     native end_drawing
 
-    jmp .loop
+    native window_should_close
+    not
+
+    jmp_if .loop

@@ -73,12 +73,12 @@ pub const Vm = struct {
 
     pub const READ_BUF_CAP = 1024;
 
-    pub inline fn init(parsed: *Parsed, natives: *const Natives, alloc: std.mem.Allocator) !Self {
+    pub inline fn init(parsed: Parsed, natives: *const Natives, alloc: std.mem.Allocator) !Self {
         return .{
             .alloc = alloc,
             .ip = parsed.ip,
-            .lm = &parsed.lm,
-            .im = &parsed.im,
+            .lm = parsed.lm,
+            .im = parsed.im,
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
@@ -90,6 +90,8 @@ pub const Vm = struct {
     pub inline fn deinit(self: *Self) void {
         self.heap.deinit();
         self.stack.deinit();
+        self.call_stack.deinit();
+        self.alloc.free(self.program);
     }
 
     inline fn get_ip(self: *Self, inst: *const Inst) !usize {
@@ -315,6 +317,17 @@ pub const Vm = struct {
             } else error.STACK_UNDERFLOW,
             .je, .jne, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
             .jmp => self.ip = try self.ip_check(try self.get_ip(inst)),
+            .jmp_if => return if (self.stack.popBack()) |b| {
+                const boolean = switch (b.getType()) {
+                    .U8, .I64, .U64, .Str => b.as(u64) > 0,
+                    .F64 => b.as(f64) > 0.0,
+                };
+
+                if (boolean) {
+                    self.ip = try self.ip_check(try self.get_ip(inst));
+                } else
+                    self.ip += 1;
+            } else error.STACK_UNDERFLOW,
             .dmpln => return if (self.stack.back()) |v| {
                 try self.print_value(v, true);
                 self.ip += 1;

@@ -45,7 +45,7 @@
 
 (eval-and-compile
   (defconst masm-instructions
-    '("push" "pop" "fadd" "fdiv" "fsub" "fmul" "iadd" "idiv" "isub" "imul" "inc" "dec" "jmp" "je" "jne" "jg" "jl" "jle" "jge" "swap" "dup" "cmp" "dmp" "nop" "label" "native" "alloc" "call" "ret" "spush" "spop" "read" "halt" "fread" "eread" "pushmp" "pushsp" "dmpln" "fwrite" "write")))
+     '("push" "pop" "fadd" "fdiv" "fsub" "fmul" "iadd" "idiv" "isub" "imul" "inc" "dec" "jmp" "je" "jne" "jg" "jl" "jle" "jge" "swap" "dup" "cmp" "dmp" "nop" "label" "native" "alloc" "call" "ret" "spush" "spop" "read" "halt" "fread" "eread" "pushmp" "pushsp" "dmpln" "fwrite" "write" "jmp_if" "not")))
 
 (defconst masm-highlights
   `((,(regexp-opt masm-instructions 'symbols) . font-lock-keyword-face)
