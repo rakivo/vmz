@@ -33,7 +33,17 @@ pub const InstType = enum {
 
     inc, dec,
 
-    jmp, jmp_if, je, jne, jg, jl, jle, jge,
+    // jump if top of the stack is true, that is how we get the boolean from the value:
+    // ```
+    // const boolean = switch (b.getType()) {
+    //     .Bool => b.as(bool),
+    //     .F64 => b.as(f64) > 0.0,
+    //     .U8, .I64, .U64, .Str => b.as(u64) > 0,
+    // };
+    // ```
+    jmp_if,
+
+    jmp, je, jne, jg, jl, jle, jge,
 
     swap, dup,
 
@@ -81,6 +91,8 @@ pub const InstType = enum {
     // no operation
     nop,
 
+    not,
+
     // halt the vm
     halt,
 
@@ -95,14 +107,14 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .swap, .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,
+            .jmp_if, .swap, .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,
             else => false,
         };
     }
 
     pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
-            .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
+            .jmp_if, .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
             .call, .native => &[_]Token.Type{.str, .literal},
             .fread => &[_]Token.Type{.int, .str},
             .spush => &[_]Token.Type{.int, .str, .char},

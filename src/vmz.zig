@@ -168,14 +168,15 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
 
 pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
     var flag_parser = try FlagParser.init(allocator);
-    defer flag_parser.deinit();
 
     const file_path = flag_parser.parse(src_flag).?;
 
     const parsed = try get_program(file_path, allocator, &flag_parser);
 
-    if (flag_parser.parse(out_flag)) |file_path_|
+    if (flag_parser.parse(out_flag)) |file_path_| {
         try write_program(file_path_, parsed.program.items);
+        exit(0);
+    }
 
     return try Vm.init(parsed, natives, allocator);
 }

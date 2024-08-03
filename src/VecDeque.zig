@@ -1,7 +1,10 @@
 const std = @import("std");
-const mem = std.mem;
+
+const mem  = std.mem;
 const math = std.math;
-const Allocator = mem.Allocator;
+
+const Allocator = std.mem.Allocator;
+
 const assert = std.debug.assert;
 
 /// Double-ended queue ported from Rust's standard library, which is provided under MIT License.
@@ -94,18 +97,16 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         /// Adds the given element to the back of the deque.
-        pub fn pushBack(self: *Self, item: T) Allocator.Error!void {
-            if (self.isFull()) try self.grow();
-
+        pub fn pushBack(self: *Self, item: T) void {
+            if (self.isFull()) self.grow();
             const head = self.head;
             self.head = self.wrapAdd(self.head, 1);
             self.buf[head] = item;
         }
 
         /// Adds the given element to the front of the deque.
-        pub fn pushFront(self: *Self, item: T) Allocator.Error!void {
-            if (self.isFull()) try self.grow();
-
+        pub fn pushFront(self: *Self, item: T) void {
+            if (self.isFull()) self.grow();
             self.tail = self.wrapSub(self.tail, 1);
             const tail = self.tail;
             self.buf[tail] = item;
@@ -130,16 +131,13 @@ pub fn VecDeque(comptime T: type) type {
         }
 
         /// Adds all the elements in the given slice to the back of the deque.
-        pub inline fn appendSlice(self: *Self, items: []const T) Allocator.Error!void {
-            for (items) |item| {
-                try self.pushBack(item);
-            }
+        pub inline fn appendSlice(self: *Self, items: []const T) void {
+            for (items) |item| self.pushBack(item);
         }
 
         /// Adds all the elements in the given slice to the front of the deque.
         pub fn prependSlice(self: *Self, items: []const T) Allocator.Error!void {
             var i: usize = items.len - 1;
-
             while (true) : (i -= 1) {
                 const item = items[i];
                 try self.pushFront(item);
@@ -193,13 +191,12 @@ pub fn VecDeque(comptime T: type) type {
             return self.cap() - self.len() == 1;
         }
 
-        fn grow(self: *Self) Allocator.Error!void {
+        inline fn grow(self: *Self) void {
             const old_cap = self.cap();
-
-            // Reserve additional space to accomodate more items
-            self.buf = try self.allocator.realloc(self.buf, old_cap * 2);
-
-            // Update `tail` and `head` pointers accordingly
+            self.buf = self.allocator.realloc(self.buf, old_cap * 2) catch |err| {
+                std.debug.print("ERROR: FAILED TO REALLOC VEC_DEQUE: {}\n", .{err});
+                std.process.exit(1);
+            };
             self.handleCapacityIncrease(old_cap);
         }
 

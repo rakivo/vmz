@@ -6,6 +6,7 @@ pub const Type = enum(u8) {
     U64,
     F64,
     Str,
+    Bool,
 };
 
 pub const NaNBox = union {
@@ -67,6 +68,7 @@ pub const NaNBox = union {
         return switch (T) {
             f64 => self.v,
             i64 => self.getValue(),
+            bool => if (self.getValue() > 0) true else false,
             u64 => @intCast(self.getValue()),
             i32 => @intCast(self.getValue()),
             u32 => @intCast(self.getValue()),
@@ -82,6 +84,7 @@ pub const NaNBox = union {
             u64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U64) },
             i64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), v), .I64) },
             u8  => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U8) },
+            bool => .{ .v = Self.setType(Self.setValue(Self.mkInf(), if (v) 1 else 0), .Bool) },
             []u8, []const u8 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v.len)), .Str) },
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
@@ -89,6 +92,7 @@ pub const NaNBox = union {
 
     pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try switch(self.getType()) {
+            .Bool => writer.print("{}", .{ self.as(bool) }),
             .F64 => writer.print("{d}f", .{ self.v }),
             .I64 => writer.print("{d}", .{ self.as(i64) }),
             .U64 => writer.print("{d}", .{ self.as(u64) }),

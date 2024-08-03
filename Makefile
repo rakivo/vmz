@@ -9,7 +9,7 @@ ifeq ($(RELEASE), 1)
 	FLAGS += -O ReleaseFast
 endif
 
-test: test.zig $(ZIG_FILES)
+vmz: test.zig $(ZIG_FILES)
 	zig build-exe $< $(FLAGS)
 
 libvmz.a: $(ZIG_FILES)

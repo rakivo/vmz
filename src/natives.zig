@@ -5,10 +5,15 @@ const Vm    = vm.Vm;
 const panic = vm.panic;
 const print = std.debug.print;
 
-pub const Natives = struct {
-    const REQUIRED_SIGNATURE = fn (*Vm) anyerror!void;
+const REQUIRED_SIGNATURE = fn (*Vm) anyerror!void;
 
-    map: std.StringHashMap(*const REQUIRED_SIGNATURE),
+pub const FnPtr = struct {
+    f: *const REQUIRED_SIGNATURE,
+    ac: usize,
+};
+
+pub const Natives = struct {
+    map: std.StringHashMap(FnPtr),
 
     const Self = @This();
 
@@ -47,29 +52,57 @@ pub const Natives = struct {
     /// ```
     /// Or, you can specify your custom names.
     pub fn init(alloc: std.mem.Allocator, comptime obj: anytype) !Self {
-        var map = std.StringHashMap(*const REQUIRED_SIGNATURE).init(alloc);
+        var map = std.StringHashMap(FnPtr).init(alloc);
 
         const info = @typeInfo(@TypeOf(obj));
-        comptime if (info != .Struct) {
+        comptime if (info != .Struct)
             @compileError("Expected provided object to be struct");
-        };
 
         inline for (info.Struct.fields) |field| {
             const field_value = @field(obj, field.name);
-            const signature = @TypeOf(field_value);
 
-            comptime if (std.ascii.isDigit(field.name[0])) {
-                @compileError("Please, specify name of your fields specifically, if you want them to have proper names in the natives map, for example:\n" ++
-                              "var natives = Natives.init(arena.allocator(), .{\n" ++
-                              "    .push_420 = push_420,\n" ++
-                              "    .push_69 = push_69\n" ++
-                              "});");
-            };
+            const ninfo = @typeInfo(@TypeOf(field_value));
+            const nfields = ninfo.Struct.fields;
 
-            comptime if (signature != REQUIRED_SIGNATURE)
-                @compileError("Signature of provided function: `" ++ @typeName(signature) ++ "`\nDoes not match required signature: `" ++ @typeName(REQUIRED_SIGNATURE) ++ "`");
+            comptime if (ninfo != .Struct)
+                @compileError("Expected provided object to be struct");
 
-            try map.put(field.name, field_value);
+            comptime if (nfields.len != 2)
+                @compileError("Expected provided object to be in following format: .{ fn_ptr, args_count }");
+
+            const ptr = @field(field_value, "0");
+            const ac = @field(field_value, "1");
+
+            comptime {
+                const signature = @TypeOf(ptr);
+
+                if (std.ascii.isDigit(field.name[0])) {
+                    @compileError("Please, specify name of your fields specifically, if you want them to have proper names in the natives map, for example:\n" ++
+                                      "var natives = Natives.init(arena.allocator(), .{\n" ++
+                                      "    .push_420 = push_420,\n" ++
+                                      "    .push_69 = push_69\n" ++
+                                      "});");
+                }
+
+                if (signature != REQUIRED_SIGNATURE)
+                    @compileError("Signature of provided function: `" ++ @typeName(signature) ++ "`\nDoes not match required signature: `" ++ @typeName(REQUIRED_SIGNATURE) ++ "`");
+            }
+
+            comptime {
+                const ty = @TypeOf(ac);
+                const acinfo = @typeInfo(ty);
+
+                if (acinfo == .Pointer)
+                    @compileError("Expected count of arguments needed for the function: " ++ field.name);
+
+                if (acinfo != .ComptimeInt)
+                    @compileError("Expected args count to be comptime integer");
+            }
+
+            try map.put(field.name, .{
+                .f = ptr,
+                .ac = @as(usize, ac)
+            });
         }
 
         return .{.map = map};

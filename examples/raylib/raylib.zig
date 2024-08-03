@@ -53,13 +53,13 @@ pub fn clear_background(vm: *Vm) anyerror!void {
 pub fn get_screen_height(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenHeight());
     const nan = NaNBox.from(u64, height);
-    try vm.stack.pushBack(nan);
+    vm.stack.pushBack(nan);
 }
 
 pub fn get_screen_width(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenWidth());
     const nan = NaNBox.from(u64, height);
-    try vm.stack.pushBack(nan);
+    vm.stack.pushBack(nan);
 }
 
 pub fn set_target_fps(vm: *Vm) anyerror!void {
@@ -96,5 +96,5 @@ pub fn draw_text(vm: *Vm) anyerror!void {
 
 pub fn window_should_close(vm: *Vm) anyerror!void {
     const b: bool = raylib.WindowShouldClose();
-    try vm.stack.pushBack(NaNBox.from(bool, b));
+    vm.stack.pushBack(NaNBox.from(bool, b));
 }

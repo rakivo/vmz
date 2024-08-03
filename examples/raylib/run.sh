@@ -7,14 +7,9 @@ CACHE_DIR="build"
 printf "Building..\n"
 
 set -xe
-
 zig build-exe main.zig $FLAGS --name $NAME --cache-dir $CACHE_DIR
-
-set +x
+set +xe
 
 printf "Starting..\n"
-printf "To close the window press C-c (ctrl + c).\n"
-
-set -x
 
 ./$NAME -p raylib.asm

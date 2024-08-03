@@ -10,15 +10,15 @@ pub fn main() !void {
     defer arena.deinit();
 
     var natives = try Natives.init(arena.allocator(), .{
-        .draw_text           = raylib.draw_text,
-        .init_window         = raylib.init_window,
-        .end_drawing         = raylib.end_drawing,
-        .begin_drawing       = raylib.begin_drawing,
-        .set_target_fps      = raylib.set_target_fps,
-        .clear_background    = raylib.clear_background,
-        .get_screen_width    = raylib.get_screen_width,
-        .get_screen_height   = raylib.get_screen_height,
-        .window_should_close = raylib.window_should_close
+        .draw_text           = .{ raylib.draw_text,           5 },
+        .init_window         = .{ raylib.init_window,         3 },
+        .end_drawing         = .{ raylib.end_drawing,         0 },
+        .begin_drawing       = .{ raylib.begin_drawing,       0 },
+        .set_target_fps      = .{ raylib.set_target_fps,      1 },
+        .clear_background    = .{ raylib.clear_background,    1 },
+        .get_screen_width    = .{ raylib.get_screen_width,    0 },
+        .get_screen_height   = .{ raylib.get_screen_height,   0 },
+        .window_should_close = .{ raylib.window_should_close, 0 },
     });
     defer natives.deinit();
 

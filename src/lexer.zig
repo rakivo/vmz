@@ -71,16 +71,9 @@ pub const Lexer = struct {
 
     pub const PP_SYMBOL = "#";
     pub const MACRO_SYMBOL = "@";
+    pub const COMMENT_SYMBOL = ";";
     pub const ERROR_TEXT = "ERROR";
     pub const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
-
-    pub const Error = error {
-        INVALID_CHAR,
-        UNEXPECTED_EOF,
-        NO_CLOSING_QUOTE,
-        UNDEFINED_SYMBOL,
-        UNEXPECTED_SPACE_IN_MACRO_DEFINITION,
-    };
 
     pub inline fn init(file_path: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) Self {
         return .{
@@ -104,7 +97,7 @@ pub const Lexer = struct {
             loc.col + 1,
             err,
         });
-        return err;
+        unreachable;
     }
 
     fn get_include_content(self: *Self) !struct {[]const u8, []const u8} {
@@ -139,14 +132,14 @@ pub const Lexer = struct {
 
     fn handle_preprocessor(self: *Self, row: *u32, line: []const u8, words: []const Ss, iter: anytype) !void {
         if (line.len < 2)
-            return report_err(Token.Loc.new(row.*, 0, self.file_path), Error.UNEXPECTED_EOF);
+            return report_err(Token.Loc.new(row.*, 0, self.file_path), error.UNEXPECTED_EOF);
 
         if (std.ascii.isWhitespace(line[1]))
-            return report_err(Token.Loc.new(row.*, 1, self.file_path), Error.UNEXPECTED_SPACE_IN_MACRO_DEFINITION);
+            return report_err(Token.Loc.new(row.*, 1, self.file_path), error.UNEXPECTED_SPACE_IN_MACRO_DEFINITION);
 
         if (line[1] == '"') {
             if (!std.mem.endsWith(u8, line, "\""))
-                return report_err(Token.Loc.new(row.*, @intCast(line.len), self.file_path), Error.NO_CLOSING_QUOTE);
+                return report_err(Token.Loc.new(row.*, @intCast(line.len), self.file_path), error.NO_CLOSING_QUOTE);
 
             var new_self = Self.init(line[2..line.len - 1], self.alloc, self.include_path);
 
@@ -296,14 +289,13 @@ pub const Lexer = struct {
                         }
 
                         continue;
-
                     // Handle string literals.
                     } else if (std.mem.startsWith(u8, w.str, "\"")) {
                         var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, w.str.len);
                         defer strs.deinit();
                         while (true) : (idx += 1) {
                             if (idx >= pp_tokens.items.len)
-                                return Error.NO_CLOSING_QUOTE;
+                                return error.NO_CLOSING_QUOTE;
 
                             try strs.append(pp_tokens.items[idx].str);
                             if (std.mem.endsWith(u8, pp_tokens.items[idx].str, "\"")) break;
@@ -400,7 +392,7 @@ pub const Lexer = struct {
 
                         while (true) : (idx.* += 1) {
                             if (idx.* >= words.len)
-                                return Error.NO_CLOSING_QUOTE;
+                                return error.NO_CLOSING_QUOTE;
 
                             const str_ = words[idx.*].str;
                             try strs.append(str_);
@@ -495,8 +487,13 @@ pub const Lexer = struct {
     pub fn lex_file(self: *Self, content: []const u8) anyerror!void {
         var row: u32 = 0;
         var iter = std.mem.split(u8, content, "\n");
-        while (iter.next()) |line| : (row += 1) {
-            if (line.len == 0) continue;
+        while (iter.next()) |line_| : (row += 1) {
+            if (line_.len == 0 or std.mem.startsWith(u8, line_, COMMENT_SYMBOL)) continue;
+
+            const line = if (std.mem.indexOf(u8, line_, COMMENT_SYMBOL)) |idx|
+                line_[0..idx]
+            else
+                line_;
 
             const words = try split_whitespace(line, self.alloc);
             var line_tokens = try std.ArrayList(Token).initCapacity(self.alloc, words.len);
@@ -511,7 +508,7 @@ pub const Lexer = struct {
             // Found a label
             if (std.ascii.isASCII(line[0]) and std.mem.endsWith(u8, line, ":")) {
                 if (words.len > 1)
-                    return report_err(Token.Loc.new(row, words[0].s, self.file_path), Error.UNDEFINED_SYMBOL);
+                    return report_err(Token.Loc.new(row, words[0].s, self.file_path), error.UNDEFINED_SYMBOL);
 
                 const start = words[0].s;
                 const label = words[0].str[0..words[0].str.len - 1];
@@ -539,6 +536,9 @@ pub const Lexer = struct {
                         print("ERROR: undefined macro: {s}\n", .{word.str});
                         return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNDEFINED_MACRO);
                     }
+                } else if (std.mem.startsWith(u8, word.str, "#")) {
+                    print("Did you mean to use a macro? If so, use '@' instead\n", .{});
+                    return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNDEFINED_SYMBOL);
                 }
 
                 var ty: Token.Type = undefined;
@@ -600,7 +600,8 @@ pub const Lexer = struct {
 
     pub inline fn read_file(file_path: []const u8, alloc: std.mem.Allocator) ![]const u8 {
         return std.fs.cwd().readFileAlloc(alloc, file_path, CONTENT_CAP) catch |err| {
-            panic("ERROR: Failed to read file: {s}: {}", .{file_path, err});
+            try panic("ERROR: Failed to read file: {s}: {}", .{file_path, err});
+            return err;
         };
     }
 

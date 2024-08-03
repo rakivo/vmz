@@ -1,11 +1,5 @@
+#"std.asm"
+
 _start:
-    push "README.md"
-    fread
-
-    push "readme.md"
-
-    push 0
-    pushmp
-    dec
-
-    fwrite
+    @fread "README.md"
+    @fwrite_all "readme.md"
