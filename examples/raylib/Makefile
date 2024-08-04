@@ -4,7 +4,7 @@ CACHE_DIR=build
 VMZ_ZIG_FILES=$(wildcard $(VMZ_DIR)/*.zig)
 FLAGS=-lc -lraylib -L./lib -I./include -O ReleaseFast
 
-all: vm
+all: $(NAME)
 	./$(NAME) -p raylib.asm
 
 vm: $(VMZ_ZIG_FILES) main.zig raylib.zig

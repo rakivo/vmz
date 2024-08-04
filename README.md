@@ -1,6 +1,6 @@
 # Vm in Zig
 
-# For quick start, we can write a `hello world` in `masm`:
+# For Quick Introduction to the `masm` language, we can write a `hello world` in it:
 ```asm
 #"std.asm"
 
@@ -39,6 +39,12 @@ _start:
 ```
 
 > You can also see an example of using [raylib](https://github.com/raysan5/raylib) in [examples/raylib](https://github.com/rakivo/vmz/tree/master/examples/raylib)
+
+## Building library and `test.zig` to test the vm:
+```
+$ make
+$ ./vmz -p <your_program.asm>
+```
 
 ### Credits:
 - raylib: <https://github.com/raysan5/raylib>

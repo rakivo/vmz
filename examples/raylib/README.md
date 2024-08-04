@@ -2,5 +2,5 @@
 
 # Quick start:
 ```console
-$ ./run.sh
+$ make
 ```
