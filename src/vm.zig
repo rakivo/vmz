@@ -49,8 +49,8 @@ pub const Vm = struct {
     program: []const Inst,
     alloc: std.mem.Allocator,
 
-    stack: Buffer(NaNBox, STACK_CAP) = Buffer(NaNBox, STACK_CAP).new(),
-    call_stack: Buffer(u64, CALL_STACK_CAP) = Buffer(u64, CALL_STACK_CAP).new(),
+    stack: Buffer(NaNBox, STACK_CAP) = .{},
+    call_stack: Buffer(u64, CALL_STACK_CAP) = .{},
 
     heap: Heap,
     memory: [MEMORY_CAP]u8 = undefined,
