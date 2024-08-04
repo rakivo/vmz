@@ -47,3 +47,5 @@ _start:
     not
 
     jmp_if .loop
+
+    native close_window

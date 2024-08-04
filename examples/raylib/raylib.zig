@@ -6,6 +6,7 @@ const raylib = @cImport(@cInclude("raylib.h"));
 
 const NaNBox = vmz.NaNBox;
 
+// InitWindow(int width, int height, const char *title);
 pub fn init_window(vm: *Vm) anyerror!void {
     const str_len = vm.stack.popBack().?.as(u64);
 
@@ -27,10 +28,17 @@ pub fn init_window(vm: *Vm) anyerror!void {
     raylib.InitWindow(w, h, @ptrCast(str.items));
 }
 
+// void CloseWindow(void)
+pub fn close_window(_: *Vm) anyerror!void {
+    raylib.CloseWindow();
+}
+
+// void BeginDrawing(void)
 pub fn begin_drawing(_: *Vm) anyerror!void {
     raylib.BeginDrawing();
 }
 
+// void EndDrawing(void)
 pub fn end_drawing(_: *Vm) anyerror!void {
     raylib.EndDrawing();
 }
@@ -44,29 +52,34 @@ fn color_from_u64(v: u64) raylib.Color {
     };
 }
 
+// void ClearBackground(Color color)
 pub fn clear_background(vm: *Vm) anyerror!void {
     const v = vm.stack.popBack().?.as(u64);
     const color = color_from_u64(v);
     raylib.ClearBackground(color);
 }
 
+// int GetScreenHeight(void)
 pub fn get_screen_height(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenHeight());
     const nan = NaNBox.from(u64, height);
     vm.stack.pushBack(nan);
 }
 
+// int GetScreenWidth(void)
 pub fn get_screen_width(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenWidth());
     const nan = NaNBox.from(u64, height);
     vm.stack.pushBack(nan);
 }
 
+// void SetTargetFPS(int fps)
 pub fn set_target_fps(vm: *Vm) anyerror!void {
     const fps: i32 = @intCast(vm.stack.popBack().?.as(u64));
     raylib.SetTargetFPS(fps);
 }
 
+// void DrawText(const char *text, int posX, int posY, int fontSize, Color color)
 pub fn draw_text(vm: *Vm) anyerror!void {
     const v = vm.stack.popBack().?.as(u64);
     const color = color_from_u64(v);
@@ -94,6 +107,7 @@ pub fn draw_text(vm: *Vm) anyerror!void {
     raylib.DrawText(@ptrCast(str.items), x, y, size, color);
 }
 
+// bool WindowShouldClose(void)
 pub fn window_should_close(vm: *Vm) anyerror!void {
     const b: bool = raylib.WindowShouldClose();
     vm.stack.pushBack(NaNBox.from(bool, b));

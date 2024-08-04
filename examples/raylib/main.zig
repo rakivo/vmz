@@ -12,6 +12,7 @@ pub fn main() !void {
     var natives = try Natives.init(arena.allocator(), .{
         .draw_text           = .{ raylib.draw_text,           5 },
         .init_window         = .{ raylib.init_window,         3 },
+        .close_window        = .{ raylib.close_window,        0 },
         .end_drawing         = .{ raylib.end_drawing,         0 },
         .begin_drawing       = .{ raylib.begin_drawing,       0 },
         .set_target_fps      = .{ raylib.set_target_fps,      1 },
