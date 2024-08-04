@@ -215,11 +215,20 @@ pub const Vm = struct {
         }
     }
 
+    inline fn write(fd: usize, bytes: []const u8) !void {
+        return switch (fd) {
+            1 => wstdin.writeAll(bytes),
+            2 => wstdout.writeAll(bytes),
+            3 => wstderr.writeAll(bytes),
+            else => unreachable,
+        };
+    }
+
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
         return switch (inst.type) {
             .push => return if (self.stack.sz < STACK_CAP) {
                 defer self.ip += 1;
-                switch (inst.value) {
+                return switch (inst.value) {
                     .U8  => |chr| self.stack.append(NaNBox.from(u8, chr)),
                     .NaN => |nan| self.stack.append(nan),
                     .F64 => |val| self.stack.append(NaNBox.from(f64, val)),
@@ -233,8 +242,8 @@ pub const Vm = struct {
                         self.stack.append_slice(nans[0..str.len]);
                         self.stack.append(NaNBox.from([]const u8, str));
                     },
-                    else => return error.INVALID_TYPE,
-                }
+                    else => error.INVALID_TYPE,
+                };
             } else error.STACK_OVERFLOW,
             .pop => return if (self.stack.sz > 0) {
                 defer self.ip += 1;
@@ -302,9 +311,9 @@ pub const Vm = struct {
             .jmp => self.ip = self.ip_check(try self.get_ip(inst)),
             .jmp_if => return if (self.stack.pop()) |b| {
                 const boolean = switch (b.getType()) {
-                    .Bool => b.as(bool),
-                    .F64 => b.as(f64) > 0.0,
+                    .Bool                 => b.as(bool),
                     .U8, .I64, .U64, .Str => b.as(u64) > 0,
+                    .F64                  => b.as(f64) > 0.0,
                 };
 
                 self.ip = if (boolean)
@@ -335,12 +344,12 @@ pub const Vm = struct {
                 const b = self.stack.back().?;
                 defer self.ip += 1;
                 b.* = switch (b.getType()) {
-                    .U8 => NaNBox.from(u8, ~b.as(u8)),
-                    .U64 => NaNBox.from(u64, ~b.as(u64)),
-                    .I64 => NaNBox.from(i64, ~b.as(i64)),
+                    .U8   => NaNBox.from(u8,   ~b.as(u8)),
+                    .U64  => NaNBox.from(u64,  ~b.as(u64)),
+                    .I64  => NaNBox.from(i64,  ~b.as(i64)),
                     .Bool => NaNBox.from(bool, !b.as(bool)),
-                    .Str => NaNBox.from(bool, b.as(u64) > 0),
-                    else => return error.INVALID_TYPE
+                    .Str  => NaNBox.from(bool,  b.as(u64) > 0),
+                    else  => return error.INVALID_TYPE
                 };
             } else error.STACK_UNDERFLOW,
             .fwrite => return if (self.stack.sz > 2) {
@@ -349,25 +358,16 @@ pub const Vm = struct {
 
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
+                        const fd = nan.as(u64);
+                        if (fd < 1 or fd > 3)
+                            return error.INVALID_FD;
+
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);
+                        const bytes = if (start == end) &[_]u8 {self.memory[start]}
+                        else                            self.memory[start..end];
 
-                        if (start == end) {
-                            try switch (nan.as(u64)) {
-                                1 => wstdin.writeAll(&[_]u8 {self.memory[start]}),
-                                2 => wstdout.writeAll(&[_]u8 {self.memory[start]}),
-                                3 => wstderr.writeAll(&[_]u8 {self.memory[start]}),
-                                else => error.INVALID_FD
-                            };
-                        } else {
-                            try switch (nan.as(u64)) {
-                                1 => wstdin.writeAll(self.memory[start..end]),
-                                2 => wstdout.writeAll(self.memory[start..end]),
-                                3 => wstderr.writeAll(self.memory[start..end]),
-                                else => error.INVALID_FD
-                            };
-                        }
-
+                        try write(fd, bytes);
                         self.ip += 1;
                     },
                     .Str => {
