@@ -21,14 +21,8 @@ const print     = std.debug.print;
 const exit      = std.process.exit;
 const assert    = std.debug.assert;
 
-const rstdin    = std.io.getStdOut().reader();
-const wstdin    = std.io.getStdOut().writer();
-
-const rstdout   = std.io.getStdOut().reader();
-const wstdout   = std.io.getStdOut().writer();
-
-const rstderr   = std.io.getStdOut().reader();
-const wstderr   = std.io.getStdOut().writer();
+const Writer    = std.fs.File.Writer;
+const Reader    = std.fs.File.Reader;
 
 pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
@@ -55,11 +49,18 @@ pub const Vm = struct {
     program: []const Inst,
     alloc: std.mem.Allocator,
 
-    stack: Buffer(NaNBox, STACK_CAP) = Buffer(NaNBox, STACK_CAP).new(),
-    call_stack: Buffer(u64, CALL_STACK_CAP) = Buffer(u64, CALL_STACK_CAP).new(),
+    stack: Buffer(NaNBox, STACK_CAP) = .{},
+    call_stack: Buffer(u64, CALL_STACK_CAP) = .{},
 
     heap: Heap,
     memory: [MEMORY_CAP]u8 = undefined,
+
+    rstdin:  Reader,
+    wstdin:  Writer,
+    rstdout: Reader,
+    wstdout: Writer,
+    rstderr: Reader,
+    wstderr: Writer,
 
     const Self = @This();
 
@@ -84,6 +85,12 @@ pub const Vm = struct {
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
+            .rstdin  = std.io.getStdIn().reader(),
+            .wstdin  = std.io.getStdIn().writer(),
+            .rstdout = std.io.getStdOut().reader(),
+            .wstdout = std.io.getStdOut().writer(),
+            .rstderr = std.io.getStdErr().reader(),
+            .wstderr = std.io.getStdErr().writer(),
         };
     }
 
@@ -171,13 +178,13 @@ pub const Vm = struct {
             .Bool => {
                 const b: u8 = if (v.as(bool)) 1 else 0;
                 const buf = if (newline) &[_]u8 {b, 10} else &[_]u8 {b};
-                _ = wstdout.write(buf) catch |err| {
+                _ = self.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .U8 => {
                 const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
-                _ = wstdout.write(buf) catch |err| {
+                _ = self.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
@@ -189,7 +196,7 @@ pub const Vm = struct {
                     panic("Failed to buf print value: {}: {}", .{v, err});
                 };
 
-                _ = wstdout.write(ret) catch |err| {
+                _ = self.wstdout.write(ret) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
@@ -204,10 +211,10 @@ pub const Vm = struct {
 
                 if (newline) {
                     str[i - 1] = 10;
-                    _ = wstdout.write(str[0..i]) catch |err| {
+                    _ = self.wstdout.write(str[0..i]) catch |err| {
                         panic("Failed to write to stdout: {}", .{err});
                     };
-                } else _ = wstdout.write(str[0..i - 1]) catch |err| {
+                } else _ = self.wstdout.write(str[0..i - 1]) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             }
@@ -215,11 +222,20 @@ pub const Vm = struct {
         }
     }
 
+    inline fn write(self: *Self, fd: usize, bytes: []const u8) !void {
+        return switch (fd) {
+            1 => self.wstdin.writeAll(bytes),
+            2 => self.wstdout.writeAll(bytes),
+            3 => self.wstderr.writeAll(bytes),
+            else => unreachable,
+        };
+    }
+
     fn execute_instruction(self: *Self, inst: *const Inst) !void {
         return switch (inst.type) {
             .push => return if (self.stack.sz < STACK_CAP) {
                 defer self.ip += 1;
-                switch (inst.value) {
+                return switch (inst.value) {
                     .U8  => |chr| self.stack.append(NaNBox.from(u8, chr)),
                     .NaN => |nan| self.stack.append(nan),
                     .F64 => |val| self.stack.append(NaNBox.from(f64, val)),
@@ -233,8 +249,8 @@ pub const Vm = struct {
                         self.stack.append_slice(nans[0..str.len]);
                         self.stack.append(NaNBox.from([]const u8, str));
                     },
-                    else => return error.INVALID_TYPE,
-                }
+                    else => error.INVALID_TYPE,
+                };
             } else error.STACK_OVERFLOW,
             .pop => return if (self.stack.sz > 0) {
                 defer self.ip += 1;
@@ -302,9 +318,9 @@ pub const Vm = struct {
             .jmp => self.ip = self.ip_check(try self.get_ip(inst)),
             .jmp_if => return if (self.stack.pop()) |b| {
                 const boolean = switch (b.getType()) {
-                    .Bool => b.as(bool),
-                    .F64 => b.as(f64) > 0.0,
+                    .Bool                 => b.as(bool),
                     .U8, .I64, .U64, .Str => b.as(u64) > 0,
+                    .F64                  => b.as(f64) > 0.0,
                 };
 
                 self.ip = if (boolean)
@@ -335,12 +351,12 @@ pub const Vm = struct {
                 const b = self.stack.back().?;
                 defer self.ip += 1;
                 b.* = switch (b.getType()) {
-                    .U8 => NaNBox.from(u8, ~b.as(u8)),
-                    .U64 => NaNBox.from(u64, ~b.as(u64)),
-                    .I64 => NaNBox.from(i64, ~b.as(i64)),
+                    .U8   => NaNBox.from(u8,   ~b.as(u8)),
+                    .U64  => NaNBox.from(u64,  ~b.as(u64)),
+                    .I64  => NaNBox.from(i64,  ~b.as(i64)),
                     .Bool => NaNBox.from(bool, !b.as(bool)),
-                    .Str => NaNBox.from(bool, b.as(u64) > 0),
-                    else => return error.INVALID_TYPE
+                    .Str  => NaNBox.from(bool,  b.as(u64) > 0),
+                    else  => return error.INVALID_TYPE
                 };
             } else error.STACK_UNDERFLOW,
             .fwrite => return if (self.stack.sz > 2) {
@@ -349,25 +365,16 @@ pub const Vm = struct {
 
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
+                        const fd = nan.as(u64);
+                        if (fd < 1 or fd > 3)
+                            return error.INVALID_FD;
+
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);
+                        const bytes = if (start == end) &[_]u8 {self.memory[start]}
+                        else                            self.memory[start..end];
 
-                        if (start == end) {
-                            try switch (nan.as(u64)) {
-                                1 => wstdin.writeAll(&[_]u8 {self.memory[start]}),
-                                2 => wstdout.writeAll(&[_]u8 {self.memory[start]}),
-                                3 => wstderr.writeAll(&[_]u8 {self.memory[start]}),
-                                else => error.INVALID_FD
-                            };
-                        } else {
-                            try switch (nan.as(u64)) {
-                                1 => wstdin.writeAll(self.memory[start..end]),
-                                2 => wstdout.writeAll(self.memory[start..end]),
-                                3 => wstderr.writeAll(self.memory[start..end]),
-                                else => error.INVALID_FD
-                            };
-                        }
-
+                        try self.write(fd, bytes);
                         self.ip += 1;
                     },
                     .Str => {
@@ -400,9 +407,9 @@ pub const Vm = struct {
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
                         const buf = try switch (nan.as(u64)) {
-                            1 => rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            2 => rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            3 => rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            1 => self.rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            2 => self.rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            3 => self.rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
                             else => self.report_err(error.INVALID_FD)
                         };
 

@@ -1,12 +1,12 @@
 pub fn Buffer(comptime T: type, comptime S: usize) type {
     return struct {
         buf: [S]T = undefined,
-        sz: usize = 0,
+        sz: u64 = 0,
 
         const Self = @This();
 
         pub inline fn new() Self {
-            return .{};
+            comptime return .{};
         }
 
         pub inline fn append(self: *Self, v: T) void {

@@ -504,7 +504,7 @@ pub const Lexer = struct {
 
     pub fn lex_file(self: *Self, content: []const u8) anyerror!void {
         var row: u32 = 0;
-        var iter = std.mem.split(u8, content, "\n");
+        var iter = std.mem.splitSequence(u8, content, "\n");
         while (iter.next()) |line_| : (row += 1) {
             if (line_.len == 0 or std.mem.startsWith(u8, line_, COMMENT_SYMBOL)) continue;
 
