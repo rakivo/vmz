@@ -32,48 +32,53 @@ pub const Parser = struct {
         UNDEFINED_SYMBOL,
     };
 
-    fn parse_inst(_: *Self, ty: InstType, operand_str: Token) !Inst {
-        switch (operand_str.type) {
-            .str, .label, .literal => return Inst.new(ty, InstValue.new([]const u8, operand_str.str)),
-            .char => return Inst.new(ty, InstValue.new(u8, operand_str.str[0])),
+    fn parse_inst(ty: InstType, operand: Token) !Inst {
+        return switch (operand.type) {
+            .char => Inst.new(ty, InstValue.new(u8, operand.str[0])),
+            .str, .label, .literal => Inst.new(ty, InstValue.new([]const u8, operand.str)),
             .int => {
-                const int = if (std.mem.startsWith(u8, operand_str.str, "0x"))
-                    std.fmt.parseInt(i64, operand_str.str[2..], 16) catch |err| {
-                        std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
-                        return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
-                    }
-                else
-                    std.fmt.parseInt(i64, operand_str.str, 10) catch |err| {
-                        std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
-                        return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
-                    };
+                var base: u8 = undefined;
+                var str: []const u8 = undefined;
+                if (std.mem.startsWith(u8, operand.str, "0x")) {
+                    str = operand.str[2..];
+                    base = 16;
+                } else {
+                    str = operand.str;
+                    base = 10;
+                }
+
+                const int = std.fmt.parseInt(i64, str, base) catch |err| {
+                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand.str, err});
+                    return report_err(operand.loc, Error.FAILED_TO_PARSE);
+                };
 
                 if (int >= 0) {
-                    if (ty == .push) {
-                        return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(u64, @intCast(int))));
-                    } else
-                        return Inst.new(ty, InstValue.new(u64, @intCast(int)));
+                    return if (ty == .push)
+                        Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(u64, @intCast(int))))
+                    else
+                        Inst.new(ty, InstValue.new(u64, @intCast(int)));
                 } else {
-                    if (ty == .push) {
-                        return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(i64, @intCast(int))));
-                    } else
-                        return Inst.new(ty, InstValue.new(i64, int));
+                    return if (ty == .push)
+                        Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(i64, @intCast(int))))
+                    else
+                        Inst.new(ty, InstValue.new(i64, int));
                 }
             },
             .float => {
-                const float = std.fmt.parseFloat(f64, operand_str.str) catch |err| {
-                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand_str.str, err});
-                    return report_err(operand_str.loc, Error.FAILED_TO_PARSE);
+                const float = std.fmt.parseFloat(f64, operand.str) catch |err| {
+                    std.debug.print("Failed parsing int: {s}: {}\n", .{operand.str, err});
+                    return report_err(operand.loc, Error.FAILED_TO_PARSE);
                 };
-                if (ty == .push) {
-                    return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(f64, float)));
-                } else
+
+                return if (ty == .push)
+                    return Inst.new(ty, InstValue.new(NaNBox, NaNBox.from(f64, float)))
+                else
                     return Inst.new(ty, InstValue.new(f64, float));
             }
-        }
+        };
     }
 
-    pub fn new(file_path: []const u8, alloc: std.mem.Allocator) Self {
+    pub inline fn new(file_path: []const u8, alloc: std.mem.Allocator) Self {
         return .{
             .file_path = file_path,
             .alloc = alloc,
@@ -140,7 +145,7 @@ pub const Parser = struct {
                     return report_err(operand.loc, Error.INVALID_TYPE);
                 }
 
-                try program.append(try self.parse_inst(ty, operand));
+                try program.append(try parse_inst(ty, operand));
                 try im.put(ip, line[idx].loc);
                 ip += 1;
             }

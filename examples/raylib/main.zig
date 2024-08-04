@@ -21,10 +21,7 @@ pub fn main() !void {
         .get_screen_height   = .{ raylib.get_screen_height,   0 },
         .window_should_close = .{ raylib.window_should_close, 0 },
     });
-    defer natives.deinit();
 
     var vm = try vmz.init(arena.allocator(), &natives);
-    defer vm.deinit();
-
     try vm.execute_program();
 }

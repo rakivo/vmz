@@ -8,11 +8,11 @@ const NaNBox = vmz.NaNBox;
 
 // InitWindow(int width, int height, const char *title);
 pub fn init_window(vm: *Vm) anyerror!void {
-    const str_len = vm.stack.popBack().?.as(u64);
+    const str_len = vm.stack.pop().?.as(u64);
 
     var str = std.ArrayList(u8).init(vm.alloc);
     for (0..str_len) |_| {
-        try str.append(vm.stack.popBack().?.as(u8));
+        try str.append(vm.stack.pop().?.as(u8));
     }
 
     for (0..str.items.len / 2) |i| {
@@ -23,8 +23,8 @@ pub fn init_window(vm: *Vm) anyerror!void {
 
     try str.append(0);
 
-    const h = vm.stack.popBack().?.as(i32);
-    const w = vm.stack.popBack().?.as(i32);
+    const h = vm.stack.pop().?.as(i32);
+    const w = vm.stack.pop().?.as(i32);
     raylib.InitWindow(w, h, @ptrCast(str.items));
 }
 
@@ -54,7 +54,7 @@ fn color_from_u64(v: u64) raylib.Color {
 
 // void ClearBackground(Color color)
 pub fn clear_background(vm: *Vm) anyerror!void {
-    const v = vm.stack.popBack().?.as(u64);
+    const v = vm.stack.pop().?.as(u64);
     const color = color_from_u64(v);
     raylib.ClearBackground(color);
 }
@@ -63,37 +63,37 @@ pub fn clear_background(vm: *Vm) anyerror!void {
 pub fn get_screen_height(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenHeight());
     const nan = NaNBox.from(u64, height);
-    vm.stack.pushBack(nan);
+    vm.stack.append(nan);
 }
 
 // int GetScreenWidth(void)
 pub fn get_screen_width(vm: *Vm) anyerror!void {
     const height: u64 = @intCast(raylib.GetScreenWidth());
     const nan = NaNBox.from(u64, height);
-    vm.stack.pushBack(nan);
+    vm.stack.append(nan);
 }
 
 // void SetTargetFPS(int fps)
 pub fn set_target_fps(vm: *Vm) anyerror!void {
-    const fps: i32 = @intCast(vm.stack.popBack().?.as(u64));
+    const fps: i32 = @intCast(vm.stack.pop().?.as(u64));
     raylib.SetTargetFPS(fps);
 }
 
 // void DrawText(const char *text, int posX, int posY, int fontSize, Color color)
 pub fn draw_text(vm: *Vm) anyerror!void {
-    const v = vm.stack.popBack().?.as(u64);
+    const v = vm.stack.pop().?.as(u64);
     const color = color_from_u64(v);
 
-    const size: i32 = @intCast(vm.stack.popBack().?.as(u64));
+    const size: i32 = @intCast(vm.stack.pop().?.as(u64));
 
-    const y: i32 = @intCast(vm.stack.popBack().?.as(u64));
-    const x: i32 = @intCast(vm.stack.popBack().?.as(u64));
+    const y: i32 = @intCast(vm.stack.pop().?.as(u64));
+    const x: i32 = @intCast(vm.stack.pop().?.as(u64));
 
-    const str_len = vm.stack.popBack().?.as(u64);
+    const str_len = vm.stack.pop().?.as(u64);
 
     var str = std.ArrayList(u8).init(vm.alloc);
     for (0..str_len) |_| {
-        try str.append(vm.stack.popBack().?.as(u8));
+        try str.append(vm.stack.pop().?.as(u8));
     }
 
     for (0..str.items.len / 2) |i| {
@@ -110,5 +110,5 @@ pub fn draw_text(vm: *Vm) anyerror!void {
 // bool WindowShouldClose(void)
 pub fn window_should_close(vm: *Vm) anyerror!void {
     const b: bool = raylib.WindowShouldClose();
-    vm.stack.pushBack(NaNBox.from(bool, b));
+    vm.stack.append(NaNBox.from(bool, b));
 }

@@ -1,5 +1,5 @@
 _start:
-    push 'a'
+    push 69
+    push 1
     pop
-    spush 'b'
-    dmp
+    dmpln
