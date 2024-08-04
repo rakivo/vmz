@@ -21,14 +21,8 @@ const print     = std.debug.print;
 const exit      = std.process.exit;
 const assert    = std.debug.assert;
 
-const rstdin    = std.io.getStdOut().reader();
-const wstdin    = std.io.getStdOut().writer();
-
-const rstdout   = std.io.getStdOut().reader();
-const wstdout   = std.io.getStdOut().writer();
-
-const rstderr   = std.io.getStdOut().reader();
-const wstderr   = std.io.getStdOut().writer();
+const Writer    = std.fs.File.Writer;
+const Reader    = std.fs.File.Reader;
 
 pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
@@ -61,6 +55,13 @@ pub const Vm = struct {
     heap: Heap,
     memory: [MEMORY_CAP]u8 = undefined,
 
+    rstdin:  Reader,
+    wstdin:  Writer,
+    rstdout: Reader,
+    wstdout: Writer,
+    rstderr: Reader,
+    wstderr: Writer,
+
     const Self = @This();
 
     pub const STR_CAP = 128;
@@ -84,6 +85,12 @@ pub const Vm = struct {
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
+            .rstdin  = std.io.getStdIn().reader(),
+            .wstdin  = std.io.getStdIn().writer(),
+            .rstdout = std.io.getStdOut().reader(),
+            .wstdout = std.io.getStdOut().writer(),
+            .rstderr = std.io.getStdErr().reader(),
+            .wstderr = std.io.getStdErr().writer(),
         };
     }
 
@@ -171,13 +178,13 @@ pub const Vm = struct {
             .Bool => {
                 const b: u8 = if (v.as(bool)) 1 else 0;
                 const buf = if (newline) &[_]u8 {b, 10} else &[_]u8 {b};
-                _ = wstdout.write(buf) catch |err| {
+                _ = self.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .U8 => {
                 const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
-                _ = wstdout.write(buf) catch |err| {
+                _ = self.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
@@ -189,7 +196,7 @@ pub const Vm = struct {
                     panic("Failed to buf print value: {}: {}", .{v, err});
                 };
 
-                _ = wstdout.write(ret) catch |err| {
+                _ = self.wstdout.write(ret) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
@@ -204,10 +211,10 @@ pub const Vm = struct {
 
                 if (newline) {
                     str[i - 1] = 10;
-                    _ = wstdout.write(str[0..i]) catch |err| {
+                    _ = self.wstdout.write(str[0..i]) catch |err| {
                         panic("Failed to write to stdout: {}", .{err});
                     };
-                } else _ = wstdout.write(str[0..i - 1]) catch |err| {
+                } else _ = self.wstdout.write(str[0..i - 1]) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             }
@@ -215,11 +222,11 @@ pub const Vm = struct {
         }
     }
 
-    inline fn write(fd: usize, bytes: []const u8) !void {
+    inline fn write(self: *Self, fd: usize, bytes: []const u8) !void {
         return switch (fd) {
-            1 => wstdin.writeAll(bytes),
-            2 => wstdout.writeAll(bytes),
-            3 => wstderr.writeAll(bytes),
+            1 => self.wstdin.writeAll(bytes),
+            2 => self.wstdout.writeAll(bytes),
+            3 => self.wstderr.writeAll(bytes),
             else => unreachable,
         };
     }
@@ -367,7 +374,7 @@ pub const Vm = struct {
                         const bytes = if (start == end) &[_]u8 {self.memory[start]}
                         else                            self.memory[start..end];
 
-                        try write(fd, bytes);
+                        try self.write(fd, bytes);
                         self.ip += 1;
                     },
                     .Str => {
@@ -400,9 +407,9 @@ pub const Vm = struct {
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
                         const buf = try switch (nan.as(u64)) {
-                            1 => rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            2 => rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            3 => rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            1 => self.rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            2 => self.rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            3 => self.rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
                             else => self.report_err(error.INVALID_FD)
                         };
 
