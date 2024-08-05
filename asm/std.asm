@@ -3,8 +3,17 @@
     dmpln
 }
 
-#fread fd {
+#fread fd, start, end {
     push fd
+    push start
+    push end
+    fread
+}
+
+#fread_all fd {
+    push fd
+    push 0
+    pushmp
     fread
 }
 
@@ -68,8 +77,10 @@
 }
 
 print_file:
-    fread
     push 0
+    push 8024
+    fread
+    swap 1
 .loop:
     eread
     dmp

@@ -7,5 +7,7 @@
 
 _start:
     push @BUF
-    dmpln
+    push 0
+    push 420
+    fwrite
     ; @fread "readme.md"
