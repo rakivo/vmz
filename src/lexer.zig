@@ -26,7 +26,7 @@ pub const Token = struct {
     };
 
     pub const Type = enum {
-        str, int, char, label, float, literal
+        str, int, char, label, float, literal, buf_expr
     };
 
     pub inline fn new(typ: Type, loc: Loc, value: []const u8) Self {
@@ -34,6 +34,21 @@ pub const Token = struct {
             .type = typ,
             .loc = loc,
             .str = value
+        };
+    }
+};
+
+const LeftSideExpr = union(enum) {
+    // Can't operate with types at runtime :(
+    type: BufType,
+    value: u8,
+
+    const Self = @This();
+
+    pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try switch(self.*) {
+            .type  => |ty| writer.print("{}", .{ty}),
+            .value => |v|  writer.print("{d}", .{v}),
         };
     }
 };
@@ -52,11 +67,42 @@ const Macro = union(enum) {
 };
 
 pub const Tokens = []const Token;
-pub const MacroMap = std.StringHashMap(Macro);
 pub const LinizedTokens = std.ArrayList(Tokens);
 pub const TokensArrayList = std.ArrayList(Tokens);
 
+pub const BufType = enum {
+    I8, I16, I32, I64, U8, U16, U32, U64, F16, F32, F64,
+
+    const Self = @This();
+
+    fn eql_ignore_case(a: []const u8, b: []const u8) bool {
+        if (a.len != b.len) return false;
+        for (0..a.len) |i|
+            if (std.ascii.toLower(a[i]) != std.ascii.toLower(b[i]))
+                return false;
+
+        return true;
+    }
+
+    pub fn try_from_str(str: []const u8) ?Self {
+        return inline for (std.meta.fields(Self)) |f| {
+            if (eql_ignore_case(f.name, str))
+                return @enumFromInt(f.value);
+        } else null;
+    }
+};
+
+pub const ComptimeBuf = struct {
+    name: []const u8,
+    size: u64,
+    leftside: LeftSideExpr,
+};
+
+pub const MacroMap = std.StringHashMap(Macro);
+pub const ComptimeBufMap = std.StringHashMap(ComptimeBuf);
+
 pub const Lexer = struct {
+    buf_map: ComptimeBufMap,
     macro_map: MacroMap,
     tokens: TokensArrayList,
     alloc: std.mem.Allocator,
@@ -75,11 +121,26 @@ pub const Lexer = struct {
     pub const ERROR_TEXT = "ERROR";
     pub const DELIM = if (builtin.os.tag == .windows) '\\' else '/';
 
+    pub const TYPE_MAP = std.StaticStringMap(BufType).initComptime(.{
+        .{"i8",  .I8},
+        .{"i16", .I16},
+        .{"i32", .I32},
+        .{"i64", .I64},
+        .{"u8",  .U8},
+        .{"u16", .U16},
+        .{"u32", .U32},
+        .{"u64", .U64},
+        .{"f16", .F16},
+        .{"f32", .F32},
+        .{"f64", .F64},
+    });
+
     pub inline fn init(file_path: []const u8, alloc: std.mem.Allocator, include_path: ?[]const u8) Self {
         return .{
             .alloc = alloc,
             .file_path = file_path,
             .include_path = include_path,
+            .buf_map = ComptimeBufMap.init(alloc),
             .macro_map = MacroMap.init(alloc),
             .tokens = TokensArrayList.init(alloc)
         };
@@ -152,13 +213,17 @@ pub const Lexer = struct {
             try self.lex_file(include_content);
 
             // Append included macros into our existing `macro_map`
-            var map_iter = new_self.macro_map.iterator();
-            while (map_iter.next()) |e|
+            var macro_map_iter = new_self.macro_map.iterator();
+            while (macro_map_iter.next()) |e|
                 try self.macro_map.put(e.key_ptr.*, e.value_ptr.*);
+
+            // Append included macros into our existing `buf_map`
+            var buf_map_iter = new_self.buf_map.iterator();
+            while (buf_map_iter.next()) |e|
+                try self.buf_map.put(e.key_ptr.*, e.value_ptr.*);
 
             for (new_self.tokens.items) |l|
                 try self.tokens.append(l);
-
         } else {
             while (iter.peek()) |line_| {
                 if (line_.len > 0) break;
@@ -256,7 +321,158 @@ pub const Lexer = struct {
                 var new_pps = try std.ArrayList(PpToken).initCapacity(self.alloc, pp_tokens.items.len);
                 while (idx < pp_tokens.items.len) : (idx += 1) {
                     const w = pp_tokens.items[idx];
-                    const loc = Token.Loc.new(w.loc.row -% 1, w.loc.col, w.loc.file_path);
+
+                    // Found array declaration
+                    if (std.mem.startsWith(u8, w.str, "[")) {
+                        // First part is must to be whether type or 8 bit integer.
+                        const first_part = blk: {
+                            if (w.str.len == 1) {
+                                if (idx + 1 >= pp_tokens.items.len)
+                                    return report_err(w.loc, error.UNEXPECTED_EOF);
+
+                                idx += 1;
+                                const str = pp_tokens.items[idx].str[1..];
+                                if (std.mem.endsWith(u8, pp_tokens.items[idx].str, ":"))
+                                    break :blk PpToken {
+                                        .loc = pp_tokens.items[idx].loc,
+                                        .str = pp_tokens.items[idx].str[0..str.len]
+                                    };
+
+                                if (idx + 1 >= pp_tokens.items.len)
+                                    return report_err(pp_tokens.items[idx].loc, error.UNEXPECTED_EOF);
+
+                                idx += 1;
+                                if (!std.mem.eql(u8, pp_tokens.items[idx].str, ":"))
+                                    return report_err(pp_tokens.items[idx].loc, error.EXPECTED_SEPARATING_COLON);
+
+                                break :blk pp_tokens.items[idx - 1];
+                            }
+
+                            if (std.mem.endsWith(u8, w.str, ":"))
+                                break :blk PpToken {
+                                    .loc = w.loc,
+                                    .str = w.str[1..w.str.len - 1]
+                                };
+
+                            if (idx + 1 >= pp_tokens.items.len)
+                                return report_err(w.loc, error.UNEXPECTED_EOF);
+
+                            idx += 1;
+                            if (std.mem.eql(u8, pp_tokens.items[idx].str, ":"))
+                                return report_err(pp_tokens.items[idx].loc, error.EXPECTED_SEPARATING_COLON);
+
+                            break :blk pp_tokens.items[idx];
+                        };
+
+                        if (idx + 1 >= pp_tokens.items.len)
+                            return report_err(w.loc, error.UNEXPECTED_EOF);
+
+                        idx += 1;
+
+                        // Second part is must be integer, representing size of array.
+                        const second_part = blk: {
+                            const token = pp_tokens.items[idx];
+                            if (std.mem.endsWith(u8, token.str, "]")) {
+                                if (token.str.len == 1)
+                                    return report_err(token.loc, error.EXPECTED_TYPE);
+
+                                break :blk PpToken {
+                                    .loc = token.loc,
+                                    .str = token.str[0..token.str.len - 1]
+                                };
+                            }
+
+                            if (idx + 1 >= pp_tokens.items.len)
+                                return report_err(pp_tokens.items[idx].loc, error.UNEXPECTED_EOF);
+
+                            idx += 1;
+                            if (!std.mem.eql(u8, pp_tokens.items[idx].str, "]"))
+                                return report_err(pp_tokens.items[idx].loc, error.EXPECTED_CLOSING_BRACKET);
+
+                            break :blk pp_tokens.items[idx - 1];
+                        };
+
+                        const left_size_expr = blk: {
+                            const loc = Token.Loc.new(first_part.loc.row -% 1,
+                                                      first_part.loc.col + 1,
+                                                      first_part.loc.file_path);
+
+                            const str = inner: {
+                                if (std.mem.startsWith(u8, first_part.str, MACRO_SYMBOL)) {
+                                    if (first_part.str.len == 1)
+                                        return report_err(loc, error.UNEXPECTED_EOF);
+
+                                    if (self.macro_map.get(std.mem.trim(u8, first_part.str[1..first_part.str.len], " "))) |macro| {
+                                        switch (macro) {
+                                            .single => |ts| {
+                                                var strs = std.ArrayList([]const u8).init(self.alloc);
+                                                defer strs.deinit();
+
+                                                for (ts) |t| try strs.append(t.str);
+                                                break :inner try std.mem.join(self.alloc, " ", strs.items);
+                                            },
+                                            .multi => |_| panic("TODO: Unimplemented", .{})
+                                        }
+                                    } else return report_err(loc, error.UNDEFINED_MACRO);
+                                }
+
+                                break :inner first_part.str;
+                            };
+
+                            if (TYPE_MAP.get(str)) |ty|
+                                break :blk LeftSideExpr {.type = ty};
+
+                            const value = std.fmt.parseUnsigned(u8, str, 10) catch {
+                                print("Expected left side expresion `{s}` to be type or unsigned 8 bit integer value\n", .{str});
+                                return report_err(loc, error.INVALID_LEFT_SIDE_EXPRESION);
+                            };
+
+                            break :blk LeftSideExpr {.value = value};
+                        };
+
+                        const size: u64 = blk: {
+                            const loc = Token.Loc.new(second_part.loc.row -% 1,
+                                                      second_part.loc.col,
+                                                      second_part.loc.file_path);
+
+                            const str: []const u8 = inner: {
+                                if (std.mem.startsWith(u8, second_part.str, MACRO_SYMBOL)) {
+                                    if (second_part.str.len == 1)
+                                        return report_err(loc, error.UNEXPECTED_EOF);
+
+                                    if (self.macro_map.get(std.mem.trim(u8, second_part.str[1..second_part.str.len], " "))) |macro| {
+                                        switch (macro) {
+                                            .single => |ts| {
+                                                var strs = std.ArrayList([]const u8).init(self.alloc);
+                                                defer strs.deinit();
+
+                                                for (ts) |t| try strs.append(t.str);
+                                                break :inner try std.mem.join(self.alloc, " ", strs.items);
+                                            },
+                                            .multi => |_| panic("TODO: Unimplemented", .{})
+                                        }
+                                    } else return report_err(loc, error.UNDEFINED_MACRO);
+                                }
+
+                                break :inner second_part.str;
+                            };
+
+                            const int = std.fmt.parseUnsigned(u64, str, 10) catch |err| {
+                                print("Failed to parse unsigned integer from `{s}`: {}\n", .{str, err});
+                                return report_err(loc, error.INVALID_RIGHT_SIDE_EXPRESION);
+                            };
+
+                            break :blk int;
+                        };
+
+                        const ctbuf = ComptimeBuf {
+                            .name = name,
+                            .leftside = left_size_expr,
+                            .size = size
+                        };
+                        try self.buf_map.put(name, ctbuf);
+                        return;
+                    }
 
                     // Found another macro in this macro.
                     if (std.mem.startsWith(u8, w.str, MACRO_SYMBOL)) {
@@ -270,13 +486,13 @@ pub const Lexer = struct {
                             }
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{w.str});
-                            return report_err(loc, error.UNDEFINED_MACRO);
+                            return report_err(Token.Loc.new(w.loc.row -% 1, w.loc.col, w.loc.file_path), error.UNDEFINED_MACRO);
                         }
 
                         continue;
                     // Handle string literals.
                     } else if (std.mem.startsWith(u8, w.str, "\"")) {
-                        var strs = try std.ArrayList([]const u8).initCapacity(self.alloc, w.str.len);
+                        var strs = std.ArrayList([]const u8).init(self.alloc);
                         defer strs.deinit();
                         while (true) : (idx += 1) {
                             if (idx >= pp_tokens.items.len)
@@ -292,7 +508,8 @@ pub const Lexer = struct {
                             .str = str,
                         };
                         try new_pps.append(t);
-                    } else try new_pps.append(w);
+                    } else
+                        try new_pps.append(w);
                 }
 
                 try self.macro_map.put(name, .{.single = new_pps.items});
@@ -339,6 +556,12 @@ pub const Lexer = struct {
                     line_tokens: *std.ArrayList(Token), words: []const Ss,
                     nargs_map: ?std.StringHashMap(Ss)) !void
     {
+        {
+            var it = self.macro_map.iterator();
+            while (it.next()) |e|
+                print("{s} : {}\n", .{e.key_ptr.*, e.value_ptr.*});
+        }
+
         const word = words[idx.*];
         switch (macro) {
             .multi => |pp| {
@@ -547,8 +770,12 @@ pub const Lexer = struct {
                     if (word.str.len == 1)
                         return report_err(Token.Loc.new(row, word.s, self.file_path), error.UNEXPECTED_EOF);
 
-                    if (self.macro_map.get(std.mem.trim(u8, word.str[1..word.str.len], " "))) |macro| {
+                    if (self.macro_map.get(std.mem.trim(u8, word.str[1..], " "))) |macro| {
                         try self.handle_macro(macro, row, &idx, &line_tokens, words, null);
+                        continue;
+                    } else if (self.buf_map.contains(word.str[1..])) {
+                        const t = Token.new(.buf_expr, Token.Loc.new(row, word.s, self.file_path), word.str[1..]);
+                        try line_tokens.append(t);
                         continue;
                     } else {
                         print("ERROR: undefined macro: {s}\n", .{word.str});
@@ -585,7 +812,7 @@ pub const Lexer = struct {
                     if (word.str.len != 3)
                         return report_err(Token.Loc.new(row, word.s, self.file_path), error.INVALID_CHAR);
 
-                    const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str[1..2]);
+                    const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str);
                     try line_tokens.append(t);
                     idx += 1;
                     continue;
@@ -629,24 +856,28 @@ pub const Lexer = struct {
         str: []const u8,
     };
 
+    // Only single line string literals are allowed for now.
     fn split_whitespace(input: []const u8, alloc: std.mem.Allocator) ![]const Ss {
         var s: u32 = 0;
         var e: u32 = 0;
+        var quote_count: u32 = 0;
         var in_string_literal = false;
         var ret = std.ArrayList(Ss).init(alloc);
         while (e < input.len) : (e += 1) {
-            if (input[e] == '"' and (e == 0 or input[e - 1] != '\\'))
+            if (input[e] == '"' and (e == 0 or input[e - 1] != '\\')) {
+                quote_count += 1;
                 in_string_literal = !in_string_literal;
+            } else if (quote_count & 1 != 0 and e == input.len - 1)
+                return error.NO_CLOSING_QUOTE;
 
             if (!in_string_literal)
                 if (std.ascii.isWhitespace(input[e])) {
                     defer s = e + 1;
-                    if (s != e) {
+                    if (s != e)
                         try ret.append(.{
                             .s = s,
                             .str = input[s..e],
                         });
-                    }
                 };
         }
 

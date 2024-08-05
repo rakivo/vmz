@@ -25,6 +25,8 @@ const Writer    = std.fs.File.Writer;
 const Reader    = std.fs.File.Reader;
 
 pub const Program  = std.ArrayList(Inst);
+pub const Buf      = []const NaNBox;
+pub const BufMap   = std.StringHashMap(Buf);
 pub const LabelMap = std.StringHashMap(u32);
 pub const InstMap  = std.AutoHashMap(u32, Loc);
 
@@ -42,6 +44,8 @@ pub const Vm = struct {
     hp: u64 = 128,
     halt: bool = false,
     program: []const Inst,
+
+    buf_map: BufMap,
 
     stack: Buffer(NaNBox, STACK_CAP) = .{},
     call_stack: Buffer(u64, CALL_STACK_CAP) = .{},
@@ -80,11 +84,49 @@ pub const Vm = struct {
     pub const READ_BUF_CAP = 1024;
 
     pub fn init(parsed: Parsed, natives: *const Natives, alloc: std.mem.Allocator) !Self {
+        var buf_map = BufMap.init(alloc);
+        var ct_buf_map_iter = parsed.buf_map.iterator();
+        while (ct_buf_map_iter.next()) |e| {
+            const buf = switch (e.value_ptr.*.leftside) {
+                .value => |v| blk: {
+                    const mem = try alloc.alloc(NaNBox, e.value_ptr.size);
+                    for (mem) |*ptr|
+                        ptr.* = NaNBox.from(u8, v);
+
+                    break :blk mem;
+                },
+                .type => |ty| blk: {
+                    const mem = try alloc.alloc(NaNBox, e.value_ptr.size);
+
+                    // Get Default value
+                    const v = switch (ty) {
+                        .I8  => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .I8)},
+                        .U8  => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .U8)},
+                        .I32 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .I32)},
+                        .U32 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .U32)},
+                        .F32 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0.0), .F32)},
+                        .I64 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .I64)},
+                        .U64 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0), .U64)},
+                        .F64 => .{.v = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), 0.0), .F64)},
+                        else => panic("UNIMPLEMENTED", .{})
+                    };
+
+                    for (mem) |*ptr|
+                        ptr.* = v;
+
+                    break :blk mem;
+                }
+            };
+
+            try buf_map.put(e.key_ptr.*, buf);
+        }
+
         return .{
             .ip = parsed.ip,
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
+            .buf_map = buf_map,
             .private = .{
                 .alloc = alloc,
                 .lm = parsed.lm,
@@ -150,15 +192,14 @@ pub const Vm = struct {
 
     fn report_err(self: *const Self, err: anyerror) anyerror {
         const loc = self.private.im.get(@intCast(self.ip)).?;
-        std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
+        print("{s}:{d}:{d}: ERROR: {}\n", .{
             loc.file_path,
             loc.row + 1,
             loc.col + 1,
             err,
         });
-        if (builtin.mode == .Debug) {
-            unreachable;
-        } else exit(1);
+        if (builtin.mode == .Debug) unreachable
+        else exit(1);
     }
 
     inline fn get_int(inst: *const Inst) ?i64 {
@@ -187,17 +228,31 @@ pub const Vm = struct {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
-            .U8 => {
+            .I8, .U8 => {
                 const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
                 _ = self.private.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
-            .I64, .U64, .F64 => {
-                var buf: [32]u8 = undefined;
-                const ret = if (newline) std.fmt.bufPrint(&buf,  "{}\n", .{v}) catch |err| {
+            .BufPtr => {
+                var buf: [64 + 1]u8 = undefined;
+                const ret_ = if (newline) std.fmt.bufPrint(&buf,  "{}\n", .{v})
+                else std.fmt.bufPrint(&buf,  "{}", .{v});
+
+                const ret = ret_ catch |err| {
                     panic("Failed to buf print value: {}: {}", .{v, err});
-                } else std.fmt.bufPrint(&buf,  "{}", .{v}) catch |err| {
+                };
+
+                _ = self.private.wstdout.write(ret) catch |err| {
+                    panic("Failed to write to stdout: {}", .{err});
+                };
+            },
+            .I32, .U32, .F32, .I64, .U64, .F64 => {
+                var buf: [32]u8 = undefined;
+                const ret_ = if (newline) std.fmt.bufPrint(&buf,  "{}\n", .{v})
+                else std.fmt.bufPrint(&buf,  "{}", .{v});
+
+                const ret = ret_ catch |err| {
                     panic("Failed to buf print value: {}: {}", .{v, err});
                 };
 
@@ -257,6 +312,9 @@ pub const Vm = struct {
 
                         self.stack.append_slice(nans[0..str.len]);
                         self.stack.append(NaNBox.from([]const u8, str));
+                    },
+                    .CtBuf => |buf| {
+                        self.stack.append(NaNBox.from(Buf, self.buf_map.get(buf.name).?));
                     },
                     else => error.INVALID_TYPE,
                 };
@@ -327,9 +385,10 @@ pub const Vm = struct {
             .jmp => self.ip = self.ip_check(try self.get_ip(inst)),
             .jmp_if => return if (self.stack.pop()) |b| {
                 const boolean = switch (b.getType()) {
-                    .Bool                 => b.as(bool),
-                    .U8, .I64, .U64, .Str => b.as(u64) > 0,
-                    .F64                  => b.as(f64) > 0.0,
+                    .BufPtr                                => true,
+                    .Bool                                  => b.as(bool),
+                    .I8, .U8, .I32, .U32, .I64, .U64, .Str => b.as(i64) > 0,
+                    .F32, .F64                             => b.as(f64) > 0.0,
                 };
 
                 self.ip = if (boolean)

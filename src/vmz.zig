@@ -18,6 +18,7 @@ const Program            = vm.Program;
 const LabelMap           = vm.LabelMap;
 
 const Loc                = lexer.Token.Loc;
+const BufMap             = lexer.ComptimeBufMap;
 const Lexer              = lexer.Lexer;
 const report_err         = lexer.Lexer.report_err;
 
@@ -93,13 +94,14 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         try lexer_.lex_file(content);
 
         var parser = Parser.new(file_path, alloc);
-        return parser.parse(&lexer_.tokens) catch exit(1);
+        return parser.parse(&lexer_) catch exit(1);
     } else {
         var ip: u32 = 0;
         var bp: usize = 0;
         var entry_point: ?u64 = 0;
-        var lm = LabelMap.init(alloc);
-        var im = InstMap.init(alloc);
+
+        var lm      = LabelMap.init(alloc);
+        var im      = InstMap.init(alloc);
         var program = Program.init(alloc);
 
         const file = try std.fs.cwd().readFileAlloc(alloc, file_path, 128 * 128);
@@ -158,9 +160,8 @@ fn get_program(file_path: []const u8, alloc: std.mem.Allocator, flag_parser: *Fl
         return Parser.Parsed {
             .lm = lm,
             .im = im,
-            .ip = entry_point orelse {
-                return report_err(Loc.new(68, 68, file_path), Parser.Error.NO_ENTRY_POINT);
-            },
+            .ip = entry_point orelse return report_err(Loc.new(68, 68, file_path), error.NO_ENTRY_POINT),
+            .buf_map = BufMap.init(alloc),
             .program = program,
         };
     };

@@ -1,22 +1,25 @@
-const std    = @import("std");
-const inst   = @import("inst.zig");
-const vm     = @import("vm.zig");
-const lexer  = @import("lexer.zig");
-const NaNBox = @import("NaNBox.zig").NaNBox;
+const std        = @import("std");
+const inst_mod   = @import("inst.zig");
+const vm_mod     = @import("vm.zig");
+const lexer_mod  = @import("lexer.zig");
+const NaNBox     = @import("NaNBox.zig").NaNBox;
 
-const LabelMap      = vm.LabelMap;
-const InstMap       = vm.InstMap;
-const Program       = vm.Program;
+const LabelMap      = vm_mod.LabelMap;
+const InstMap       = vm_mod.InstMap;
+const Program       = vm_mod.Program;
 
-const Inst          = inst.Inst;
-const InstType      = inst.InstType;
-const InstValue     = inst.InstValue;
+const Inst          = inst_mod.Inst;
+const InstType      = inst_mod.InstType;
+const InstValue     = inst_mod.InstValue;
 
-const Loc           = lexer.Token.Loc;
-const Token         = lexer.Token;
-const MacroMap      = lexer.MacroMap;
-const LinizedTokens = lexer.LinizedTokens;
-const report_err    = lexer.Lexer.report_err;
+const Token         = lexer_mod.Token;
+const Lexer         = lexer_mod.Lexer;
+const ComptimeBuf   = lexer_mod.ComptimeBuf;
+const BufMap        = lexer_mod.ComptimeBufMap;
+const MacroMap      = lexer_mod.MacroMap;
+const Loc           = lexer_mod.Token.Loc;
+const LinizedTokens = lexer_mod.LinizedTokens;
+const report_err    = lexer_mod.Lexer.report_err;
 
 pub const Parser = struct {
     file_path: []const u8,
@@ -24,17 +27,13 @@ pub const Parser = struct {
 
     const Self = @This();
 
-    pub const Error = error {
-        NO_OPERAND,
-        INVALID_TYPE,
-        NO_ENTRY_POINT,
-        FAILED_TO_PARSE,
-        UNDEFINED_SYMBOL,
-    };
-
-    fn parse_inst(ty: InstType, operand: Token) !Inst {
+    fn parse_inst(ty: InstType, operand: Token, buf_map: *const BufMap) !Inst {
         return switch (operand.type) {
             .char => Inst.new(ty, InstValue.new(u8, operand.str[0])),
+            .buf_expr => Inst.new(ty, InstValue.new(ComptimeBuf, buf_map.get(operand.str) orelse {
+                std.debug.print("Undefined buffer: {s}\n", .{operand.str});
+                return report_err(operand.loc, error.UNDEFINED_BUFFER);
+            })),
             .str, .label, .literal => Inst.new(ty, InstValue.new([]const u8, operand.str)),
             .int => {
                 var base: u8 = undefined;
@@ -49,7 +48,7 @@ pub const Parser = struct {
 
                 const int = std.fmt.parseInt(i64, str, base) catch |err| {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand.str, err});
-                    return report_err(operand.loc, Error.FAILED_TO_PARSE);
+                    return report_err(operand.loc, error.FAILED_TO_PARSE);
                 };
 
                 if (int >= 0) {
@@ -67,7 +66,7 @@ pub const Parser = struct {
             .float => {
                 const float = std.fmt.parseFloat(f64, operand.str) catch |err| {
                     std.debug.print("Failed parsing int: {s}: {}\n", .{operand.str, err});
-                    return report_err(operand.loc, Error.FAILED_TO_PARSE);
+                    return report_err(operand.loc, error.FAILED_TO_PARSE);
                 };
 
                 return if (ty == .push)
@@ -89,6 +88,7 @@ pub const Parser = struct {
         ip: u64,
         im: InstMap,
         lm: LabelMap,
+        buf_map: BufMap,
         program: Program,
 
         pub inline fn deinit(parsed: *Parsed) void {
@@ -98,7 +98,10 @@ pub const Parser = struct {
         }
     };
 
-    pub fn parse(self: *Self, ts: *LinizedTokens) !Parsed {
+    pub fn parse(self: *Self, lexer: *const Lexer) !Parsed {
+        const ts = lexer.tokens;
+        const buf_map = lexer.buf_map;
+
         var ip: u32 = 0;
         var entry_point: ?u64 = null;
         var lm = LabelMap.init(self.alloc);
@@ -121,31 +124,38 @@ pub const Parser = struct {
 
                 const tyo = InstType.try_from_str(line[idx].str);
                 if (tyo == null)
-                    return report_err(line[idx].loc, Error.UNDEFINED_SYMBOL);
+                    return report_err(line[idx].loc, error.UNDEFINED_SYMBOL);
 
                 const ty = tyo.?;
                 if (!ty.arg_required()) {
-                    try program.append(Inst.new(ty, inst.None));
+                    try program.append(Inst.new(ty, inst_mod.None));
                     try im.put(ip, line[idx].loc);
                     ip += 1;
                     continue;
                 }
 
-                if (idx + 1 > line.len) return report_err(line[idx].loc, Error.NO_OPERAND);
+                if (idx + 1 > line.len) return report_err(line[idx].loc, error.NO_OPERAND);
                 idx += 1;
 
                 if (idx >= line.len)
-                    return report_err(line[idx - 1].loc, Error.NO_OPERAND);
+                    return report_err(line[idx - 1].loc, error.NO_OPERAND);
 
                 const operand = line[idx];
+                if (operand.type == .buf_expr) {
+                    try program.append(try parse_inst(ty, operand, &buf_map));
+                    try im.put(ip, line[idx].loc);
+                    ip += 1;
+                    continue;
+                }
+
                 if (std.mem.indexOf(Token.Type,
                                     ty.expected_types(),
                                     &[_]Token.Type{operand.type}) == null)
                 {
-                    return report_err(operand.loc, Error.INVALID_TYPE);
+                    return report_err(operand.loc, error.INVALID_TYPE);
                 }
 
-                try program.append(try parse_inst(ty, operand));
+                try program.append(try parse_inst(ty, operand, &buf_map));
                 try im.put(ip, line[idx].loc);
                 ip += 1;
             }
@@ -153,10 +163,11 @@ pub const Parser = struct {
 
         return Parsed {
             .ip = if (entry_point) |e| e else {
-                return report_err(Loc.new(68, 68, self.file_path), Error.NO_ENTRY_POINT);
+                return report_err(Loc.new(68, 68, self.file_path), error.NO_ENTRY_POINT);
             },
             .lm = lm,
             .im = im,
+            .buf_map = buf_map,
             .program = program,
         };
     }

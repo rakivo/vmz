@@ -1,12 +1,18 @@
 const std = @import("std");
+const Buf = @import("vm.zig").Buf;
 
 pub const Type = enum(u8) {
+    I8,
     U8,
     I64,
+    I32,
     U64,
+    U32,
     F64,
+    F32,
     Str,
     Bool,
+    BufPtr,
 };
 
 pub const NaNBox = union {
@@ -72,6 +78,8 @@ pub const NaNBox = union {
             u64 => @intCast(self.getValue()),
             i32 => @intCast(self.getValue()),
             u32 => @intCast(self.getValue()),
+            f32 => self.v,
+            i8  => @intCast(self.getValue()),
             u8  => @intCast(self.getValue()),
             usize => @intCast(self.getValue()),
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
@@ -86,17 +94,23 @@ pub const NaNBox = union {
             u8  => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U8) },
             bool => .{ .v = Self.setType(Self.setValue(Self.mkInf(), if (v) 1 else 0), .Bool) },
             []u8, []const u8 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v.len)), .Str) },
+            Buf => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @as(i64, @intCast(@intFromPtr(v.ptr)))), .BufPtr) },
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
     }
 
     pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try switch(self.getType()) {
-            .Bool => writer.print("{}", .{ self.as(bool) }),
+            .U8  => writer.print("{d}", .{ self.as(u8) }),
+            .I8  => writer.print("{d}", .{ self.as(i8) }),
             .F64 => writer.print("{d}f", .{ self.v }),
+            .F32 => writer.print("{d}f", .{ self.v }),
             .I64 => writer.print("{d}", .{ self.as(i64) }),
             .U64 => writer.print("{d}", .{ self.as(u64) }),
-            .U8  => writer.print("{d}", .{ self.as(u8) }),
+            .U32 => writer.print("{d}", .{ self.as(u32) }),
+            .I32 => writer.print("{d}", .{ self.as(i32) }),
+            .Bool => writer.print("{}", .{ self.as(bool) }),
+            .BufPtr => writer.print("Buf Ptr: {}", .{ @as(*Buf, @ptrFromInt(self.as(u64))) }),
             .Str => writer.print("Str size: {d}", .{ self.as(usize) }),
         };
     }

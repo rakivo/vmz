@@ -1,16 +1,19 @@
-const std     = @import("std");
-const builtin = @import("builtin");
-const vm_mod  = @import("vm.zig");
-const nan_mod = @import("NaNBox.zig");
-const Token   = @import("lexer.zig").Token;
+const std       = @import("std");
+const builtin   = @import("builtin");
+const vm_mod    = @import("vm.zig");
+const nan_mod   = @import("NaNBox.zig");
+const lexer_mod = @import("lexer.zig");
 
-const Vm        = vm_mod.Vm;
-const STR_CAP   = Vm.STR_CAP;
-const STACK_CAP = Vm.STACK_CAP;
-const panic     = vm_mod.panic;
+const Token       = lexer_mod.Token;
+const ComptimeBuf = lexer_mod.ComptimeBuf;
 
-const NaNBox = nan_mod.NaNBox;
-const Type   = nan_mod.Type;
+const Vm          = vm_mod.Vm;
+const STR_CAP     = Vm.STR_CAP;
+const STACK_CAP   = Vm.STACK_CAP;
+const panic       = vm_mod.panic;
+
+const NaNBox      = nan_mod.NaNBox;
+const Type        = nan_mod.Type;
 
 pub const CHUNK_SIZE = 10;
 pub const STRING_PLACEHOLDER: *const [8:0]u8 = "$STRING$";
@@ -91,6 +94,7 @@ pub const InstType = enum {
     // no operation
     nop,
 
+    // logical not
     not,
 
     // halt the vm
@@ -118,7 +122,7 @@ pub const InstType = enum {
             .call, .native => &[_]Token.Type{.str, .literal},
             .fread => &[_]Token.Type{.int, .str},
             .spush => &[_]Token.Type{.int, .str, .char},
-            .push => &[_]Token.Type{.int, .str, .char, .float},
+            .push => &[_]Token.Type{.int, .str, .char, .float, .buf_expr},
             .alloc, .swap, .dup => &[_]Token.Type{.int},
             else  => &[_]Token.Type{},
         };
@@ -139,6 +143,7 @@ pub const InstValue = union(enum) {
     None: void,
     NaN: NaNBox,
     Str: []const u8,
+    CtBuf: ComptimeBuf,
 
     const Self = @This();
 
@@ -192,13 +197,14 @@ pub const InstValue = union(enum) {
 
     pub inline fn new(comptime T: type, v: T) Self {
         return switch (T) {
-            u8         => .{ .U8 = v },
-            i64        => .{ .I64 = v },
-            f64        => .{ .F64 = v },
-            u64        => .{ .U64 = v },
-            void       => .{ .None = {} },
-            NaNBox     => .{ .NaN = v },
-            []const u8 => if (v.len > 1) {
+            u8          => .{ .U8 = v },
+            i64         => .{ .I64 = v },
+            f64         => .{ .F64 = v },
+            u64         => .{ .U64 = v },
+            void        => .{ .None = {} },
+            NaNBox      => .{ .NaN = v },
+            ComptimeBuf => .{ .CtBuf = v },
+            []const u8  => if (v.len > 1) {
                 if (v.len - 1 >= STR_CAP) {
                     const cap: usize = if (v.len - 1 >= STACK_CAP) STACK_CAP else STR_CAP;
                     panic("String length: {} is greater than the maximum capacity {}", .{v.len, cap});
