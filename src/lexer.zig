@@ -588,6 +588,7 @@ pub const Lexer = struct {
                     const t = Token.new(.char, Token.Loc.new(row, word.s, self.file_path), word.str[1..2]);
                     try line_tokens.append(t);
                     idx += 1;
+                    continue;
                 }
 
                 if (std.mem.startsWith(u8, word.str, "-")) {
@@ -631,15 +632,23 @@ pub const Lexer = struct {
     fn split_whitespace(input: []const u8, alloc: std.mem.Allocator) ![]const Ss {
         var s: u32 = 0;
         var e: u32 = 0;
+        var in_string_literal = false;
         var ret = std.ArrayList(Ss).init(alloc);
-        while (e < input.len) : (e += 1)
-            if (std.ascii.isWhitespace(input[e])) {
-                defer s = e + 1;
-                if (s != e)
-                    try ret.append(.{
-                        .s = s, .str = input[s..e]
-                    });
-            };
+        while (e < input.len) : (e += 1) {
+            if (input[e] == '"' and (e == 0 or input[e - 1] != '\\'))
+                in_string_literal = !in_string_literal;
+
+            if (!in_string_literal)
+                if (std.ascii.isWhitespace(input[e])) {
+                    defer s = e + 1;
+                    if (s != e) {
+                        try ret.append(.{
+                            .s = s,
+                            .str = input[s..e],
+                        });
+                    }
+                };
+        }
 
         if (s != e)
             try ret.append(.{

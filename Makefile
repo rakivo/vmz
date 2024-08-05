@@ -12,10 +12,12 @@ endif
 
 all: vmz_linux vmz_windows
 
-vmz_linux: vmz.zig $(ZIG_FILES)
+vmz_linux: vmz
+vmz: vmz.zig $(ZIG_FILES)
 	zig build-exe $< $(FLAGS)
 
-vmz_windows: vmz.zig $(ZIG_FILES)
+vmz_windows: vmz.exe
+vmz.exe: vmz.zig $(ZIG_FILES)
 	zig build-exe $< $(CROSS_COMPILE_FLAGS)
 
 libvmz.a: $(ZIG_FILES)

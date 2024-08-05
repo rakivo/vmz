@@ -3,6 +3,9 @@
 *.bin
 *.java
 *.data
+*.obj
+*.exe
+*.pdb
 libvmz.a
 readme.md
 FlameGraph

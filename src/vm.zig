@@ -37,30 +37,33 @@ pub inline fn panic(comptime fmt: []const u8, args: anytype) !void {
 }
 
 pub const Vm = struct {
+    ip: u64,
     mp: u64 = 0,
     hp: u64 = 128,
     halt: bool = false,
-    flags: Flags = Flags.new(),
-
-    ip: u64,
-    im: InstMap,
-    lm: LabelMap,
-    natives: *const Natives,
     program: []const Inst,
-    alloc: std.mem.Allocator,
 
     stack: Buffer(NaNBox, STACK_CAP) = .{},
     call_stack: Buffer(u64, CALL_STACK_CAP) = .{},
 
     heap: Heap,
+    natives: *const Natives,
     memory: [MEMORY_CAP]u8 = undefined,
 
-    rstdin:  Reader,
-    wstdin:  Writer,
-    rstdout: Reader,
-    wstdout: Writer,
-    rstderr: Reader,
-    wstderr: Writer,
+    private: struct {
+        flags: Flags = Flags.new(),
+
+        im: InstMap,
+        lm: LabelMap,
+        alloc: std.mem.Allocator,
+
+        rstdin:  Reader,
+        wstdin:  Writer,
+        rstdout: Reader,
+        wstdout: Writer,
+        rstderr: Reader,
+        wstderr: Writer,
+    },
 
     const Self = @This();
 
@@ -78,26 +81,28 @@ pub const Vm = struct {
 
     pub fn init(parsed: Parsed, natives: *const Natives, alloc: std.mem.Allocator) !Self {
         return .{
-            .alloc = alloc,
             .ip = parsed.ip,
-            .lm = parsed.lm,
-            .im = parsed.im,
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
-            .rstdin  = std.io.getStdIn().reader(),
-            .wstdin  = std.io.getStdIn().writer(),
-            .rstdout = std.io.getStdOut().reader(),
-            .wstdout = std.io.getStdOut().writer(),
-            .rstderr = std.io.getStdErr().reader(),
-            .wstderr = std.io.getStdErr().writer(),
+            .private = .{
+                .alloc = alloc,
+                .lm = parsed.lm,
+                .im = parsed.im,
+                .rstdin  = std.io.getStdIn().reader(),
+                .wstdin  = std.io.getStdIn().writer(),
+                .rstdout = std.io.getStdOut().reader(),
+                .wstdout = std.io.getStdOut().writer(),
+                .rstderr = std.io.getStdErr().reader(),
+                .wstderr = std.io.getStdErr().writer(),
+            }
         };
     }
 
     inline fn get_ip(self: *Self, inst: *const Inst) !usize {
         return switch (inst.value) {
             .U64 => |ip| ip,
-            .Str => |str| if (self.lm.get(str)) |ip| ip else return error.UNDEFINED_SYMBOL,
+            .Str => |str| if (self.private.lm.get(str)) |ip| ip else return error.UNDEFINED_SYMBOL,
             .NaN => |nan| @intCast(nan.as(i64)),
             else => error.INVALID_TYPE
         };
@@ -112,7 +117,7 @@ pub const Vm = struct {
 
     inline fn jmp_if_flag(self: *Self, inst: *const Inst) !void {
         const flag = Flag.from_inst(inst).?;
-        self.ip = if (self.flags.is(flag))
+        self.ip = if (self.private.flags.is(flag))
             self.ip_check(try self.get_ip(inst))
         else
             self.ip + 1;
@@ -144,7 +149,7 @@ pub const Vm = struct {
     }
 
     fn report_err(self: *const Self, err: anyerror) anyerror {
-        const loc = self.im.get(@intCast(self.ip)).?;
+        const loc = self.private.im.get(@intCast(self.ip)).?;
         std.debug.print("{s}:{d}:{d}: ERROR: {}\n", .{
             loc.file_path,
             loc.row + 1,
@@ -178,13 +183,13 @@ pub const Vm = struct {
             .Bool => {
                 const b: u8 = if (v.as(bool)) 1 else 0;
                 const buf = if (newline) &[_]u8 {b, 10} else &[_]u8 {b};
-                _ = self.wstdout.write(buf) catch |err| {
+                _ = self.private.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .U8 => {
                 const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
-                _ = self.wstdout.write(buf) catch |err| {
+                _ = self.private.wstdout.write(buf) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
@@ -196,25 +201,29 @@ pub const Vm = struct {
                     panic("Failed to buf print value: {}: {}", .{v, err});
                 };
 
-                _ = self.wstdout.write(ret) catch |err| {
+                _ = self.private.wstdout.write(ret) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             },
             .Str => if (self.stack.sz > v.as(u64)) {
                 const len = v.as(u64);
                 const stack_len = self.stack.sz;
-                const nans = self.stack.buf[stack_len - 1 - len..];
+                const nans = self.stack.buf[stack_len - 1 - len..stack_len];
+
+                if (nans.len > STR_CAP) panic("ERROR: STRING IS TOO LONG", .{});
+
                 var str: [STR_CAP + 1]u8 = undefined;
                 var i: usize = 0;
-                while (i < nans.len) : (i += 1)
+                while (i < nans.len) : (i += 1) {
                     str[i] = nans[i].as(u8);
+                }
 
                 if (newline) {
                     str[i - 1] = 10;
-                    _ = self.wstdout.write(str[0..i]) catch |err| {
+                    _ = self.private.wstdout.write(str[0..i]) catch |err| {
                         panic("Failed to write to stdout: {}", .{err});
                     };
-                } else _ = self.wstdout.write(str[0..i - 1]) catch |err| {
+                } else _ = self.private.wstdout.write(str[0..i - 1]) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
             }
@@ -224,9 +233,9 @@ pub const Vm = struct {
 
     inline fn write(self: *Self, fd: usize, bytes: []const u8) !void {
         return switch (fd) {
-            1 => self.wstdin.writeAll(bytes),
-            2 => self.wstdout.writeAll(bytes),
-            3 => self.wstderr.writeAll(bytes),
+            1 => self.private.wstdin.writeAll(bytes),
+            2 => self.private.wstdout.writeAll(bytes),
+            3 => self.private.wstderr.writeAll(bytes),
             else => unreachable,
         };
     }
@@ -341,9 +350,9 @@ pub const Vm = struct {
                 const b = self.stack.pop().?;
                 defer self.ip += 1;
                 return switch (a.getType()) {
-                    .I64 => self.flags.cmp(i64, a.as(i64), b.as(i64)),
-                    .U64 => self.flags.cmp(u64, a.as(u64), b.as(u64)),
-                    .F64 => self.flags.cmp(f64, a.as(f64), b.as(f64)),
+                    .I64 => self.private.flags.cmp(i64, a.as(i64), b.as(i64)),
+                    .U64 => self.private.flags.cmp(u64, a.as(u64), b.as(u64)),
+                    .F64 => self.private.flags.cmp(f64, a.as(f64), b.as(f64)),
                     else => error.INVALID_TYPE
                 };
             } else error.STACK_UNDERFLOW,
@@ -372,7 +381,7 @@ pub const Vm = struct {
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);
                         const bytes = if (start == end) &[_]u8 {self.memory[start]}
-                        else                            self.memory[start..end];
+                        else                                    self.memory[start..end];
 
                         try self.write(fd, bytes);
                         self.ip += 1;
@@ -407,9 +416,9 @@ pub const Vm = struct {
                 return switch (nan.getType()) {
                     .U8, .I64, .U64 => {
                         const buf = try switch (nan.as(u64)) {
-                            1 => self.rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            2 => self.rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
-                            3 => self.rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            1 => self.private.rstdin.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            2 => self.private.rstdout.readUntilDelimiter(self.memory[self.mp..], '\n'),
+                            3 => self.private.rstderr.readUntilDelimiter(self.memory[self.mp..], '\n'),
                             else => self.report_err(error.INVALID_FD)
                         };
 
@@ -448,8 +457,8 @@ pub const Vm = struct {
                 if (exact_idx >= MEMORY_CAP)
                     return error.ILLEGAL_MEMORY_ACCESS;
 
-                defer self.ip += 1;
                 self.stack.append(NaNBox.from(u8, self.memory[exact_idx]));
+                self.ip += 1;
             } else error.STACK_UNDERFLOW,
             .write => return if (self.stack.sz > 1) {
                 const nan = self.stack.buf[self.stack.sz - 1 - 1];
@@ -519,17 +528,29 @@ pub const Vm = struct {
                     .F64 => |val| self.stack.append(NaNBox.from(f64, val)),
                     .U64 => |val| self.stack.append(NaNBox.from(u64, val)),
                     .I64 => |val| self.stack.append(NaNBox.from(i64, val)),
-                    .Str => |str| {
+                    .Str => |str| { // TODO: clean this cood
                         _ = blk: {
                             if (self.stack.back()) |back| {
-                                if (back.getType() != .Str) break :blk;
-                                const new_str_len = back.as(u64) + str.len;
-                                back.* = NaNBox.from(u8, str[0]);
-                                for (1..str.len) |i|
-                                    self.stack.append(NaNBox.from(u8, str[i]));
+                                switch (back.getType()) {
+                                    .Str => break :blk,
+                                    .U8 => {
+                                        const new_str_len = str.len + 1;
+                                        for (str) |byte|
+                                            self.stack.append(NaNBox.from(u8, byte));
 
-                                const new_str_len_nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(new_str_len)), .Str);
-                                self.stack.append(NaNBox {.v = new_str_len_nan});
+                                        const new_str_len_nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(new_str_len)), .Str);
+                                        self.stack.append(NaNBox {.v = new_str_len_nan});
+                                    },
+                                    else => {
+                                        const new_str_len = back.as(u64) + str.len;
+                                        back.* = NaNBox.from(u8, str[0]);
+                                        for (1..str.len) |i|
+                                            self.stack.append(NaNBox.from(u8, str[i]));
+
+                                        const new_str_len_nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(new_str_len)), .Str);
+                                        self.stack.append(NaNBox {.v = new_str_len_nan});
+                                    }
+                                }
                             } else break :blk;
                             self.ip += 1;
                             return;
@@ -539,8 +560,20 @@ pub const Vm = struct {
                         for (str, 0..) |byte, i|
                             nans[i] = NaNBox.from(u8, byte);
 
-                        self.stack.append_slice(nans[0..str.len]);
-                        self.stack.append(NaNBox.from([]const u8, str));
+                        if (self.stack.back()) |back| {
+                            if (back.getType() == .Str) {
+                                const new_str_len = str.len + back.as(u64);
+                                const new_str_len_nan = NaNBox.setType(NaNBox.setValue(NaNBox.mkInf(), @intCast(new_str_len)), .Str);
+
+                                back.* = nans[0];
+                                self.stack.append_slice(nans[1..str.len]);
+                                self.stack.append(NaNBox {.v = new_str_len_nan});
+                            }
+                        } else {
+                            self.stack.append_slice(nans[0..str.len]);
+                            self.stack.append(NaNBox.from([]const u8, str));
+                        }
+
                         self.ip += 1;
                     },
                     else => error.INVALID_TYPE,
