@@ -1,13 +1,10 @@
 #"std.asm"
 
-#BUF_CAP 5
+#BUF_CAP 128
 #TYPE i64
 #VALUE 69
-#BUF [i32: @BUF_CAP]
+#BUF [@VALUE: @BUF_CAP]
 
 _start:
-    push @BUF
-    push 0
-    push 420
-    fwrite
-    ; @fread "readme.md"
+    @fread_all_buf @BUF, "build.zig.zon"
+    @fwrite_all_buf @BUF, "rakivo.asm"

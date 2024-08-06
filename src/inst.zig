@@ -79,6 +79,12 @@ pub const InstType = enum {
     // print last element on the stack to the stdout
     dmp,
 
+    // pushes onto the stack size of the last element, calculated this way:
+    // if the element is string, it pushes its length,
+    // if it's buffer pointer, it pushes the length of the slice on which pointer points.
+    // otherwise, it pushes its size in bytes.
+    sizeof,
+
     // print last element + newline on the stack to the stdout
     dmpln,
 

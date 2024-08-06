@@ -45,6 +45,7 @@ pub const Vm = struct {
     hp: u64 = 128,
     halt: bool = false,
     program: []const Inst,
+    alloc: std.mem.Allocator,
 
     buf_map: BufMap,
 
@@ -60,7 +61,6 @@ pub const Vm = struct {
 
         im: InstMap,
         lm: LabelMap,
-        alloc: std.mem.Allocator,
 
         rstdin:  Reader,
         wstdin:  Writer,
@@ -123,13 +123,13 @@ pub const Vm = struct {
         }
 
         return .{
+            .alloc = alloc,
             .ip = parsed.ip,
+            .buf_map = buf_map,
             .natives = natives,
             .heap = try Heap.init(alloc),
             .program = parsed.program.items,
-            .buf_map = buf_map,
             .private = .{
-                .alloc = alloc,
                 .lm = parsed.lm,
                 .im = parsed.im,
                 .rstdin  = std.io.getStdIn().reader(),
@@ -430,10 +430,84 @@ pub const Vm = struct {
                     else  => return error.INVALID_TYPE
                 };
             } else error.STACK_UNDERFLOW,
+            .sizeof => return if (self.stack.sz > 0) {
+                const nan = self.stack.back().?;
+                const nan_type = nan.getType();
+                const v = NaNBox.from(u64, switch (nan_type) {
+                    .I8  => @sizeOf(i8),
+                    .U8  => @sizeOf(u8),
+                    .I64 => @sizeOf(i64),
+                    .I32 => @sizeOf(i32),
+                    .U64 => @sizeOf(u64),
+                    .U32 => @sizeOf(u32),
+                    .F64 => @sizeOf(f64),
+                    .F32 => @sizeOf(f32),
+                    .Str => nan.as(u64),
+                    .Bool => @sizeOf(bool),
+                    .BufPtr => nan.as(u64),
+                });
+
+                if (nan_type == .BufPtr) self.stack.drop();
+                if (nan_type == .Str)
+                    for (0..nan.as(u64)) |_|
+                        self.stack.drop();
+
+                self.stack.back().?.* = v;
+                self.ip += 1;
+            } else error.STACK_UNDERFLOW,
             .fwrite => return if (self.stack.sz > 2) {
                 const stack_len = self.stack.sz;
                 const nan = self.stack.buf[stack_len - 2 - 1];
-                return switch (nan.getType()) {
+
+                const nan_type = nan.getType();
+                if (2 + 2 < stack_len) blk: {
+                    const offset = if (nan_type == .Str) nan.as(u64) else 0;
+                    const potential_bufptr = self.stack.buf[stack_len - 2 - 2 - offset];
+                    if (potential_bufptr.getType() != .BufPtr) break :blk;
+
+                    const ptr_len = potential_bufptr.as(u64);
+
+                    var bytes = try std.ArrayList(u8).initCapacity(self.alloc, ptr_len);
+                    defer bytes.deinit();
+
+                    const ptr: [*]NaNBox = @ptrFromInt(self.stack.buf[stack_len - 2 - 2 - 1 - offset].as(u64));
+                    for (0..ptr_len) |i| try bytes.append(ptr[i].as(u8));
+                    if (nan_type == .Str) {
+                        const len = nan.as(u64);
+                        const nans = self.stack.buf[stack_len - len - 1 - 2..stack_len - 1 - 2];
+                        var str: [STR_CAP]u8 = undefined;
+                        var i: usize = 0;
+                        while (i < nans.len) : (i += 1)
+                            str[i] = nans[i].as(u8);
+
+                        const file_path = str[0..i];
+                        const start = self.stack.buf[stack_len - 1 - 1].as(u64);
+                        const end = self.stack.buf[stack_len - 0 - 1].as(u64);
+                        if (start > ptr_len or end > ptr_len or start == end)
+                            return error.ILLEGAL_MEMORY_ACCESS;
+
+                        std.fs.cwd().writeFile(.{
+                            .sub_path = file_path,
+                            .data = bytes.items[start..end],
+                        }) catch |err| panic("Failed to write to file {s}: {}\n", .{file_path, err});
+                    } else {
+                        const fd = nan.as(u64);
+                        if (fd < 1 or fd > 3)
+                            return error.INVALID_FD;
+
+                        try switch (fd) {
+                            1 => self.private.wstdin.print("{s}", .{bytes.items}),
+                            2 => self.private.wstdout.print("{s}", .{bytes.items}),
+                            3 => self.private.wstderr.print("{s}", .{bytes.items}),
+                            else => unreachable,
+                        };
+                    }
+
+                    self.ip += 1;
+                    return;
+                }
+
+                return switch (nan_type) {
                     .U8, .I64, .U64 => {
                         const fd = nan.as(u64);
                         if (fd < 1 or fd > 3)
@@ -449,20 +523,6 @@ pub const Vm = struct {
                         else                                    self.memory[start..end];
 
                         try self.write(fd, bytes);
-                        self.ip += 1;
-                    },
-                    .BufPtr => {
-                        // If this happened, it means something went horribly wrong with BufPtr handling.
-                        if (stack_len - 2 - 2 < 0)
-                            unreachable;
-
-                        const len = nan.as(u64);
-                        const nan_ = self.stack.buf[stack_len - 2 - 2];
-                        const ptr: [*]NaNBox = @ptrFromInt(nan_.as(u64));
-
-                        // TODO: Make separate constant for the preallocated capacity
-                        var nans = try std.ArrayList(NaNBox).initCapacity(self.private.alloc, 64);
-                        for (0..len) |i| try nans.append(ptr[i]);
                         self.ip += 1;
                     },
                     .Str => {
@@ -490,10 +550,58 @@ pub const Vm = struct {
                     else => error.INVALID_TYPE,
                 };
             } else error.STACK_UNDERFLOW,
-            .fread => return if (self.stack.sz > 0) {
+            .fread => return if (self.stack.sz > 2) {
                 const stack_len = self.stack.sz;
                 const nan = self.stack.buf[stack_len - 2 - 1];
-                return switch (nan.getType()) {
+                const nan_type = nan.getType();
+
+                if (2 + 2 < stack_len) blk: {
+                    const offset = if (nan_type == .Str) nan.as(u64) else 0;
+                    const potential_bufptr = self.stack.buf[stack_len - 2 - 2 - offset];
+                    if (potential_bufptr.getType() != .BufPtr) break :blk;
+
+                    const ptr_len = potential_bufptr.as(u64);
+
+                    const start = self.stack.buf[stack_len - 1 - 1].as(u64);
+                    const end = self.stack.buf[stack_len - 0 - 1].as(u64);
+                    if (start > ptr_len or end > ptr_len) return error.ILLEGAL_MEMORY_ACCESS;
+
+                    const ptr: [*]NaNBox = @ptrFromInt(self.stack.buf[stack_len - 2 - 2 - 1 - offset].as(u64));
+                    if (nan_type == .Str) {
+                        const len = nan.as(u64);
+                        const nans = self.stack.buf[stack_len - len - 1 - 2..stack_len - 1 - 2];
+                        var str: [STR_CAP]u8 = undefined;
+                        for (nans, 0..) |nan_, i| str[i] = nan_.as(u8);
+
+                        var buf_: [8 * 1024]u8 = undefined;
+                        const buf = std.fs.cwd().readFile(str[0..len], &buf_) catch |err| {
+                            print("ERROR: Failed to read file `{s}`: {}\n", .{str[0..len], err});
+                            return error.FAILED_TO_READ_FILE;
+                        };
+
+                        if (buf.len > ptr_len) return error.BUFFER_OVERFLOW;
+                        for (0..buf.len) |i| ptr[i] = NaNBox.from(u8, buf[i]);
+                    } else {
+                        const fd = nan.as(u64);
+                        var buf_: [8 * 1024]u8 = undefined;
+                        const buf = try switch (fd) {
+                            1 => self.private.rstdin .readUntilDelimiter(&buf_, '\n'),
+                            2 => self.private.rstdout.readUntilDelimiter(&buf_, '\n'),
+                            3 => self.private.rstderr.readUntilDelimiter(&buf_, '\n'),
+                            else => self.report_err(error.INVALID_FD)
+                        };
+
+                        if (buf.len >= READ_BUF_CAP or buf.len > ptr_len)
+                            return error.READ_BUF_OVERFLOW;
+
+                        for (0..buf.len) |i| ptr[i] = NaNBox.from(u8, buf[i]);
+                    }
+
+                    self.ip += 1;
+                    return;
+                }
+
+                return switch (nan_type) {
                     .U8, .I64, .U64 => {
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);
@@ -518,8 +626,7 @@ pub const Vm = struct {
                         const len = nan.as(u64);
                         const nans = self.stack.buf[stack_len - len - 1 - 2..stack_len - 1 - 2];
                         var str: [STR_CAP]u8 = undefined;
-                        for (nans, 0..) |nan_, i|
-                            str[i] = nan_.as(u8);
+                        for (nans, 0..) |nan_, i| str[i] = nan_.as(u8);
 
                         const start = self.stack.buf[stack_len - 1 - 1].as(u64);
                         const end = self.stack.buf[stack_len - 0 - 1].as(u64);

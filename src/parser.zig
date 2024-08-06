@@ -141,6 +141,19 @@ pub const Parser = struct {
                     return report_err(line[idx - 1].loc, error.NO_OPERAND);
 
                 const operand = line[idx];
+                if (std.mem.startsWith(u8, operand.str, "@")) {
+                    if (operand.str.len > 1 and buf_map.contains(operand.str[1..])) {
+                        try program.append(try parse_inst(ty, Token {
+                            .loc = operand.loc,
+                            .str = operand.str[1..],
+                            .type = .buf_expr
+                        }, &buf_map));
+                        try im.put(ip, line[idx].loc);
+                        ip += 1;
+                        continue;
+                    }
+                }
+
                 if (operand.type == .buf_expr) {
                     try program.append(try parse_inst(ty, operand, &buf_map));
                     try im.put(ip, line[idx].loc);
@@ -162,9 +175,7 @@ pub const Parser = struct {
         }
 
         return Parsed {
-            .ip = if (entry_point) |e| e else {
-                return report_err(Loc.new(68, 68, self.file_path), error.NO_ENTRY_POINT);
-            },
+            .ip = entry_point orelse return report_err(Loc.new(68, 68, self.file_path), error.NO_ENTRY_POINT),
             .lm = lm,
             .im = im,
             .buf_map = buf_map,

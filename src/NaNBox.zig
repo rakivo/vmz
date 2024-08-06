@@ -110,8 +110,8 @@ pub const NaNBox = union {
             .U32 => writer.print("{d}", .{ self.as(u32) }),
             .I32 => writer.print("{d}", .{ self.as(i32) }),
             .Bool => writer.print("{}", .{ self.as(bool) }),
-            .BufPtr => writer.print("Buf Ptr: {}", .{ @as(*Buf, @ptrFromInt(self.as(u64))) }),
             .Str => writer.print("Str size: {d}", .{ self.as(usize) }),
+            .BufPtr => writer.print("Buf Slice Len: {}", .{ self.as(u64) }),
         };
     }
 };

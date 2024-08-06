@@ -1,3 +1,5 @@
+#MEMORY_CAP 8192
+
 #print what {
     push what
     dmpln
@@ -29,6 +31,24 @@
     push 0
     pushmp
     fwrite
+}
+
+#fwrite_all_buf buf, fd {
+    push buf
+    push fd
+    push 0
+    push buf
+    sizeof
+    fwrite
+}
+
+#fread_all_buf buf, fd {
+    push buf
+    push fd
+    push 0
+    push buf
+    sizeof
+    fread
 }
 
 #fadd what {
@@ -78,7 +98,7 @@
 
 print_file:
     push 0
-    push 8024
+    push @MEMORY_CAP
     fread
     swap 1
 .loop:

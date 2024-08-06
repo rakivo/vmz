@@ -1,11 +1,12 @@
 *.o
 *.py
 *.bin
-*.java
-*.data
 *.obj
 *.exe
+*.asm
 *.pdb
+*.java
+*.data
 libvmz.a
 readme.md
 FlameGraph

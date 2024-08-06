@@ -161,21 +161,26 @@ pub const Lexer = struct {
         unreachable;
     }
 
-    fn get_include_content(self: *Self) !struct {[]const u8, []const u8} {
+    fn get_include_content(self: *Self) !struct {
+        content: []const u8,
+        file_path: []const u8,
+    } {
         return .{
-            std.fs.cwd().readFileAlloc(self.alloc, self.file_path, CONTENT_CAP) catch |err| {
+            .content = std.fs.cwd().readFileAlloc(self.alloc, self.file_path, CONTENT_CAP) catch |err| {
                 if (self.include_path) |path| {
-                    var path_buf_: [PATH_CAP]u8 = undefined;
-                    const path_buf = try std.fmt.bufPrint(&path_buf_, "{s}{c}{s}", .{path, DELIM, self.file_path});
-                    if (path_buf.len >= PATH_CAP)
-                        return error.PATH_IS_TOO_LONG;
+                    var path_buf = std.ArrayList(u8).init(self.alloc);
+                    try path_buf.appendSlice(path);
+                    try path_buf.append(DELIM);
+                    try path_buf.appendSlice(self.file_path);
 
+                    if (path_buf.items.len >= PATH_CAP) return error.PATH_IS_TOO_LONG;
                     return .{
-                        try read_file(path_buf, self.alloc),
-                        path_buf
+                        .content = try read_file(path_buf.items, self.alloc),
+                        .file_path = path_buf.items
                     };
                 } else panic("ERROR: Failed to read file: {s}: {}", .{self.file_path, err});
-            }, self.include_path.?
+            },
+            .file_path = self.include_path.?
         };
     }
 
@@ -192,25 +197,22 @@ pub const Lexer = struct {
     }
 
     fn handle_preprocessor(self: *Self, row: *u32, line: []const u8, words: []const Ss, iter: anytype) !void {
+        const file_path = self.file_path;
+
         if (line.len < 2)
-            return report_err(Token.Loc.new(row.*, 0, self.file_path), error.UNEXPECTED_EOF);
+            return report_err(Token.Loc.new(row.*, 0, file_path), error.UNEXPECTED_EOF);
 
         if (std.ascii.isWhitespace(line[1]))
-            return report_err(Token.Loc.new(row.*, 1, self.file_path), error.UNEXPECTED_SPACE_IN_MACRO_DEFINITION);
+            return report_err(Token.Loc.new(row.*, 1, file_path), error.UNEXPECTED_SPACE_IN_MACRO_DEFINITION);
 
         if (line[1] == '"') {
             if (!std.mem.endsWith(u8, line, "\""))
-                return report_err(Token.Loc.new(row.*, @intCast(line.len), self.file_path), error.NO_CLOSING_QUOTE);
+                return report_err(Token.Loc.new(row.*, @intCast(line.len), file_path), error.NO_CLOSING_QUOTE);
 
             var new_self = Self.init(line[2..line.len - 1], self.alloc, self.include_path);
-
             const ret = try new_self.get_include_content();
-
-            const include_content = @field(ret, "0");
-            const full_include_path = @field(ret, "1");
-            new_self.file_path = full_include_path;
-
-            try self.lex_file(include_content);
+            new_self.file_path = ret.file_path;
+            try new_self.lex_file(ret.content);
 
             // Append included macros into our existing `macro_map`
             var macro_map_iter = new_self.macro_map.iterator();
@@ -222,8 +224,8 @@ pub const Lexer = struct {
             while (buf_map_iter.next()) |e|
                 try self.buf_map.put(e.key_ptr.*, e.value_ptr.*);
 
-            for (new_self.tokens.items) |l|
-                try self.tokens.append(l);
+            for (new_self.tokens.items) |l| try self.tokens.append(l);
+            return;
         } else {
             while (iter.peek()) |line_| {
                 if (line_.len > 0) break;
@@ -237,7 +239,7 @@ pub const Lexer = struct {
             for (words[1..]) |t| {
                 try pp_tokens.append(.{
                     .str = t.str,
-                    .loc = Token.Loc.new(row.*, t.s, self.file_path)
+                    .loc = Token.Loc.new(row.*, t.s, file_path)
                 });
             }
 
@@ -301,7 +303,7 @@ pub const Lexer = struct {
                         const pp = Token {
                             .type = try self.type_pp_token(w.str),
                             .str = w.str,
-                            .loc = Token.Loc.new(row.*, w.s, self.file_path)
+                            .loc = Token.Loc.new(row.*, w.s, file_path)
                         };
                         try new_words.append(pp);
                     }
@@ -484,6 +486,9 @@ pub const Lexer = struct {
                                 .single => |ts| try new_pps.appendSlice(ts),
                                 .multi => |_| panic("TODO: Unimplemented", .{})
                             }
+                        } else if (self.buf_map.contains(w.str[1..])) {
+                            try new_pps.append(w);
+                            continue;
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{w.str});
                             return report_err(Token.Loc.new(w.loc.row -% 1, w.loc.col, w.loc.file_path), error.UNDEFINED_MACRO);
@@ -508,8 +513,7 @@ pub const Lexer = struct {
                             .str = str,
                         };
                         try new_pps.append(t);
-                    } else
-                        try new_pps.append(w);
+                    } else try new_pps.append(w);
                 }
 
                 try self.macro_map.put(name, .{.single = new_pps.items});
@@ -556,12 +560,6 @@ pub const Lexer = struct {
                     line_tokens: *std.ArrayList(Token), words: []const Ss,
                     nargs_map: ?std.StringHashMap(Ss)) !void
     {
-        {
-            var it = self.macro_map.iterator();
-            while (it.next()) |e|
-                print("{s} : {}\n", .{e.key_ptr.*, e.value_ptr.*});
-        }
-
         const word = words[idx.*];
         switch (macro) {
             .multi => |pp| {
@@ -661,6 +659,11 @@ pub const Lexer = struct {
                             };
 
                             try args_map.put(pp.args[count].str, wss_);
+                            count += 1;
+                            continue;
+                        } else if (self.buf_map.contains(wss.str[1..])) {
+                            try args_map.put(pp.args[count].str, wss);
+                            count += 1;
                             continue;
                         } else {
                             print("ERROR: undefined macro: {s}\n", .{wss.str});
