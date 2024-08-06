@@ -175,6 +175,11 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
     const parsed = try get_program(file_path, allocator, &flag_parser);
 
     if (flag_parser.parse(out_flag)) |file_path_| {
+        if (parsed.buf_map.unmanaged.size > 0) {
+            std.debug.print("[WARN] You're using the brand new comptime buffers in your program, but I haven't implemented new ABI supporting them. So, I can't write your program.. :(", .{});
+            exit(1);
+        }
+
         try write_program(file_path_, parsed.program.items);
         exit(0);
     }
