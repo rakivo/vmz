@@ -49,35 +49,36 @@ pub const Compiler = struct {
         self.wprint("    " ++ fmt, args);
     }
 
-    pub fn compile_inst(self: *const Self, inst: *const Inst) void {
+    pub fn compile_inst(self: *const Self, inst: *const Inst, float_counter: *u64) void {
         self.wprint("; {s} {}", .{inst.type.to_str(), inst.value});
         switch (inst.type) {
             .push => switch (inst.value) {
                 .I64 => |int| {
                     self.wt("mov rsi, qword [stack_ptr]");
-                    self.wprintt("mov qword [rsi], {d}", .{int});
+                    self.wprintt("mov qword [rsi], 0x{X}", .{int});
                     self.wt("add [stack_ptr], WORD_SIZE");
                 },
                 .U64 => |int| {
                     self.wt("mov rsi, qword [stack_ptr]");
-                    self.wprintt("mov qword [rsi], {d}", .{int});
+                    self.wprintt("mov qword [rsi], 0x{X}", .{int});
                     self.wt("add [stack_ptr], WORD_SIZE");
                 },
-                .F64 => |float| {
-                    _ = float;
-                    self.wt("mov rax, [FLOAT]");
+                .F64 => |_| {
+                    defer float_counter.* += 1;
+                    self.wprintt("mov rax, [__f{d}__]", .{float_counter.*});
                     self.wt("mov rsi, qword [stack_ptr]");
-                    self.wprintt("mov qword [rsi], rax", .{});
+                    self.wt("mov qword [rsi], rax");
                     self.wt("add [stack_ptr], WORD_SIZE");
                 },
                 .NaN => |nan| switch (nan.getType()) {
                     .I64, .U64 => {
                         self.wt("mov rsi, qword [stack_ptr]");
-                        self.wprintt("mov qword [rsi], {d}", .{nan.as(i64)});
+                        self.wprintt("mov qword [rsi], 0x{X}", .{nan.as(i64)});
                         self.wt("add [stack_ptr], WORD_SIZE");
                     },
-                    .F64 => {
-                        self.wt("mov rax, [FLOAT]");
+                    .F32, .F64 => {
+                        defer float_counter.* += 1;
+                        self.wprintt("mov rax, [__f{d}__]", .{float_counter.*});
                         self.wt("mov rsi, qword [stack_ptr]");
                         self.wprintt("mov qword [rsi], rax", .{});
                         self.wt("add [stack_ptr], WORD_SIZE");
@@ -85,6 +86,11 @@ pub const Compiler = struct {
                     else => panic("Unimplemented", .{})
                 },
                 else => panic("Unimplemented", .{})
+            },
+            .pop => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov [stack_ptr], rsi");
             },
             .iadd => {
                 self.wt("mov rsi, [stack_ptr]");
@@ -94,7 +100,33 @@ pub const Compiler = struct {
                 self.wt("add rax, rbx");
                 self.wt("mov [rsi], rax");
             },
-            .fadd => {
+            .imul => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("xor edx, edx");
+                self.wt("imul rbx");
+                self.wt("mov [rsi], rax");
+            },
+            .idiv => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("xor edx, edx");
+                self.wt("idiv rbx");
+                self.wt("mov [rsi], rax");
+            },
+            .isub => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("sub rax, rbx");
+                self.wt("mov [rsi], rax");
+            },
+            .fmul => {
                 self.wt("mov rsi, [stack_ptr]");
                 self.wt("sub rsi, WORD_SIZE");
                 self.wt("mov rbx, [rsi]");
@@ -105,31 +137,70 @@ pub const Compiler = struct {
                 self.wt("movq rax, xmm0");
                 self.wt("mov [rsi], rax");
             },
-            .dmpln => {
+            .fdiv => {
                 self.wt("mov rsi, [stack_ptr]");
-                self.wt("mov rax, [rsi - 8]");
-                self.wt("movq xmm1, rax");
-                self.wt("cvttsd2si rdi, xmm0");
-                self.wt("call dmp_i64");
-                // self.wt("mov rsi, qword [stack_ptr]");
-                // self.wt("sub rsi, WORD_SIZE");
-                // self.wt("mov rdi, qword [rsi]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("movq xmm0, rax");
+                self.wt("movq xmm1, rbx");
+                self.wt("divsd xmm0, xmm1");
+                self.wt("movq rax, xmm0");
+                self.wt("mov [rsi], rax");
+            },
+            .fadd => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("movq xmm0, rax");
+                self.wt("movq xmm1, rbx");
+                self.wt("addsd xmm0, xmm1");
+                self.wt("movq rax, xmm0");
+                self.wt("mov [rsi], rax");
+            },
+            .fsub => {
+                self.wt("mov rsi, [stack_ptr]");
+                self.wt("sub rsi, WORD_SIZE");
+                self.wt("mov rbx, [rsi]");
+                self.wt("mov rax, [rsi - WORD_SIZE]");
+                self.wt("movq xmm0, rax");
+                self.wt("movq xmm1, rbx");
+                self.wt("subsd xmm0, xmm1");
+                self.wt("movq rax, xmm0");
+                self.wt("mov [rsi], rax");
+            },
+            // TODO: Accept optional type into the `dmp` and `dmpln` instructions to generate proper assembly
+            .dmpln => {
+                // I haven't implemented dmp_f64 yet, so, we're just converting f64 to i64 using `cvttsd2si` and printing it as it is.
+                // self.wt("mov rsi, [stack_ptr]");
+                // self.wt("mov rax, [rsi - WORD_SIZE]");
+                // self.wt("movq xmm0, rax");
+                // self.wt("cvttsd2si rdi, xmm0");
                 // self.wt("call dmp_i64");
+
+                // Print i64:
+                self.wt("mov rsi, qword [stack_ptr]");
+                self.wt("mov rdi, qword [rsi - WORD_SIZE]");
+                self.wt("call dmp_i64");
             },
             .label => self.wprint("{s}:", .{inst.value.Str}),
             .halt => {
-                self.wt("mov rax, 60");
+                self.wt("mov rax, SYS_EXIT");
                 self.wt("xor rdi, rdi");
                 self.wt("syscall");
             },
-            else => {}
+            else => panic("{s} is unimplemented yet..", .{inst.type.to_str()})
         }
     }
 
     pub fn compile(self: *const Self) !void {
         self.w("format ELF64");
-        self.w("define STACK_CAP 1024");
-        self.w("define WORD_SIZE 8");
+        self.w("define STACK_CAP  1024");
+        self.w("define WORD_SIZE  8");
+        self.w("define SYS_WRITE  1");
+        self.w("define SYS_STDOUT 1");
+        self.w("define SYS_EXIT   60");
         self.w("section '.text' executable");
         self.w("dmp_i64:");
         self.w("    push    rbp");
@@ -228,19 +299,35 @@ pub const Compiler = struct {
         self.w("    mov     byte [rbp + rax - 32], 10");
         self.w("    lea     rsi, [rbp - 32]");
         self.w("    movsxd  rdx, dword [rbp - 36]");
-        self.w("    mov     edi, 1");
-        self.w("    mov     eax, 1");
+        self.w("    mov     eax, SYS_WRITE");
+        self.w("    mov     edi, SYS_STDOUT");
         self.w("    syscall");
         self.w("    add     rsp, 64");
         self.w("    pop     rbp");
         self.w("    ret");
         self.w("public _start");
 
-        for (self.program) |inst| self.compile_inst(&inst);
+        var float_counter: u64 = 0;
+        for (self.program) |inst| {
+            self.compile_inst(&inst, &float_counter);
+        }
 
         self.w("section '.data' writeable");
+        float_counter = 0;
+        for (self.program) |inst| {
+            switch (inst.value) {
+                .F64 => |f| {
+                    self.wprint("__f{d}__ dq 0x{X}", .{float_counter, @as(u64, @bitCast(f))});
+                    float_counter += 1;
+                },
+                .NaN => |nan| if (nan.getType() == .F32 or nan.getType() == .F64) {
+                    self.wprint("__f{d}__ dq 0x{X}", .{float_counter, @as(u64, @bitCast(nan.as(f64)))});
+                    float_counter += 1;
+                },
+                else => {}
+            }
+        }
         self.w("stack_ptr dq stack_buf");
         self.w("stack_buf rq STACK_CAP");
-        self.w("FLOAT dq 3.14");
     }
 };
