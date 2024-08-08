@@ -115,6 +115,10 @@ pub const InstType = enum {
         } else null;
     }
 
+    pub fn to_str(self: Self) []const u8 {
+        return @tagName(self);
+    }
+
     pub fn arg_required(self: Self) bool {
         return switch (self) {
             .jmp_if, .swap, .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,

@@ -3,6 +3,7 @@ const builtin   = @import("builtin");
 const inst_mod  = @import("inst.zig");
 const flag_mod  = @import("flags.zig");
 const lexer_mod = @import("lexer.zig");
+const Compiler  = @import("compiler.zig").Compiler;
 const Heap      = @import("heap.zig").Heap;
 const NaNBox    = @import("NaNBox.zig").NaNBox;
 const Buffer    = @import("Buffer.zig").Buffer;
@@ -112,9 +113,7 @@ pub const Vm = struct {
                         else => panic("UNIMPLEMENTED", .{})
                     };
 
-                    for (mem) |*ptr|
-                        ptr.* = v;
-
+                    for (mem) |*ptr| ptr.* = v;
                     break :blk mem;
                 }
             };
@@ -854,6 +853,11 @@ pub const Vm = struct {
                 catch |err| return self.report_err(err);
             if (DEBUG) print("INST: {}\nSTACK: {any}\n", .{inst, self.stack.buf[0..self.stack.sz]});
         }
+    }
+
+    pub fn compile_program_to_x86_64(self: *Self, file_path: []const u8) !void {
+        var compiler = try Compiler.new(self.alloc, self.program, file_path);
+        try compiler.compile();
     }
 };
 

@@ -9,11 +9,12 @@
 *.data
 libvmz.a
 readme.md
-FlameGraph
 
 vmz
+prog
 main
 build
 zig-out
 zig-cache
 .zig-cache
+FlameGraph

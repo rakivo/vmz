@@ -184,5 +184,7 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
         exit(0);
     }
 
-    return try Vm.init(parsed, natives, allocator);
+    var vm_ = try Vm.init(parsed, natives, allocator);
+    try vm_.compile_program_to_x86_64("prog.asm");
+    exit(0);
 }
