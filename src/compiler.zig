@@ -170,7 +170,6 @@ pub const Compiler = struct {
                 self.wt("movq [r15 - WORD_SIZE], xmm0");
                 self.wt("mov [stack_ptr], r15");
             },
-            // TODO: Accept optional type into the `dmp` and `dmpln` instructions to generate proper assembly
             .dmpln => switch (inst.value.Type) {
                 .F64 => {
                     self.wt("mov r15, [stack_ptr]");
@@ -249,30 +248,25 @@ pub const Compiler = struct {
                 self.wt("mov qword [r15], rax");
                 self.wt("add qword [stack_ptr], WORD_SIZE");
             },
+            .jl => if (is_fcmp.*) self.wprintt("jb {s}", .{inst.value.Str})
+                   else           self.wprintt("jl {s}", .{inst.value.Str}),
+            .jg => if (is_fcmp.*) self.wprintt("ja {s}", .{inst.value.Str})
+                   else           self.wprintt("jg {s}", .{inst.value.Str}),
+            .jle => if (is_fcmp.*) {
+                self.wprintt("jb {s}", .{inst.value.Str});
+                self.wprintt("je {s}", .{inst.value.Str});
+            } else self.wprintt("jle {s}", .{inst.value.Str}),
+            .jge => if (is_fcmp.*) {
+                self.wprintt("ja {s}", .{inst.value.Str});
+                self.wprintt("je {s}", .{inst.value.Str});
+            } else self.wprintt("jge {s}", .{inst.value.Str}),
+            .jmp, .jnz, .je, .jne => self.wprintt("{s} {s}", .{inst.type.to_str(), inst.value.Str}),
             .halt => {
                 self.wt("mov rax, SYS_EXIT");
                 self.wt("xor rdi, rdi");
                 self.wt("syscall");
             },
             .label => self.wprint("{s}:", .{inst.value.Str}),
-
-            .jl => if (is_fcmp.*) self.wprintt("jb {s}", .{inst.value.Str})
-                   else           self.wprintt("jl {s}", .{inst.value.Str}),
-
-            .jg => if (is_fcmp.*) self.wprintt("ja {s}", .{inst.value.Str})
-                   else           self.wprintt("jg {s}", .{inst.value.Str}),
-
-            .jle => if (is_fcmp.*) {
-                self.wprintt("jb {s}", .{inst.value.Str});
-                self.wprintt("je {s}", .{inst.value.Str});
-            } else self.wprintt("jle {s}", .{inst.value.Str}),
-
-            .jge => if (is_fcmp.*) {
-                self.wprintt("ja {s}", .{inst.value.Str});
-                self.wprintt("je {s}", .{inst.value.Str});
-            } else self.wprintt("jge {s}", .{inst.value.Str}),
-
-            .jmp, .jnz, .je, .jne => self.wprintt("{s} {s}", .{inst.type.to_str(), inst.value.Str}),
             inline else => panic("{s} is unimplemented yet..", .{inst.type.to_str()})
         }
     }
