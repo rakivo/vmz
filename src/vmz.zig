@@ -36,12 +36,16 @@ const ASM_FILE_EXTENSION: []const u8 = ".asm";
 const ENTRY_POINT_NAME: []const u8 = "_start";
 
 const out_flag = Flag([]const u8, "-o", "--output", .{
-    .help = "path to bin output file"
+    .help = "path to bin output file that will be generated"
 }).new();
 
 const src_flag = Flag([]const u8, "-p", "--path", .{
     .help = "path to src file",
     .mandatory = true,
+}).new();
+
+const asm_flag = Flag([]const u8, "-S", "--asm", .{
+    .help = "path to asm file that will be generated"
 }).new();
 
 const include_flag = Flag([]const u8, "-I", "--include", .{
@@ -180,11 +184,12 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
         }
 
         try write_program(file_path_, parsed.program.items);
-        exit(0);
     }
 
     var vm_ = try Vm.init(parsed, natives, allocator);
-    try vm_.execute_program();
-    try vm_.compile_program_to_x86_64("prog.asm");
-    exit(0);
+    if (flag_parser.parse(asm_flag)) |file_path_| {
+        try vm_.compile_program_to_x86_64(file_path_);
+    }
+
+    return vm_;
 }

@@ -83,13 +83,11 @@ pub const Compiler = struct {
                         self.wprintt("mov qword [r15], rax", .{});
                         self.wt("add qword [stack_ptr], WORD_SIZE");
                     },
-                    else => panic("Unimplemented", .{})
+                    inline else => panic("Unimplemented", .{})
                 },
-                else => panic("Unimplemented", .{})
+                inline else => panic("Unimplemented", .{})
             },
-            .pop => {
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
-            },
+            .pop => self.wt("sub qword [stack_ptr], WORD_SIZE"),
             .iadd => {
                 self.wt("mov r15, [stack_ptr]");
                 self.wt("sub r15, WORD_SIZE");
@@ -97,7 +95,7 @@ pub const Compiler = struct {
                 self.wt("mov rax, [r15 - WORD_SIZE]");
                 self.wt("add rax, rbx");
                 self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("mov [stack_ptr], r15");
             },
             .imul => {
                 self.wt("mov r15, [stack_ptr]");
@@ -107,7 +105,7 @@ pub const Compiler = struct {
                 self.wt("xor edx, edx");
                 self.wt("imul rbx");
                 self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("mov [stack_ptr], r15");
             },
             .idiv => {
                 self.wt("mov r15, [stack_ptr]");
@@ -117,7 +115,7 @@ pub const Compiler = struct {
                 self.wt("xor edx, edx");
                 self.wt("idiv rbx");
                 self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("mov [stack_ptr], r15");
             },
             .isub => {
                 self.wt("mov r15, [stack_ptr]");
@@ -136,8 +134,7 @@ pub const Compiler = struct {
                 self.wt("movq xmm0, rax");
                 self.wt("movq xmm1, rbx");
                 self.wt("mulsd xmm0, xmm1");
-                self.wt("movq rax, xmm0");
-                self.wt("mov qword [r15 - WORD_SIZE], rax");
+                self.wt("movq [r15 - WORD_SIZE], xmm0");
                 self.wt("mov qword [stack_ptr], r15");
             },
             .fdiv => {
@@ -148,9 +145,8 @@ pub const Compiler = struct {
                 self.wt("movq xmm0, rax");
                 self.wt("movq xmm1, rbx");
                 self.wt("divsd xmm0, xmm1");
-                self.wt("movq rax, xmm0");
-                self.wt("mov qword [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("movq [r15 - WORD_SIZE], xmm0");
+                self.wt("mov [stack_ptr], r15");
             },
             .fadd => {
                 self.wt("mov r15, [stack_ptr]");
@@ -160,9 +156,8 @@ pub const Compiler = struct {
                 self.wt("movq xmm0, rax");
                 self.wt("movq xmm1, rbx");
                 self.wt("addsd xmm0, xmm1");
-                self.wt("movq rax, xmm0");
-                self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("movq [r15 - WORD_SIZE], xmm0");
+                self.wt("mov [stack_ptr], r15");
             },
             .fsub => {
                 self.wt("mov r15, [stack_ptr]");
@@ -172,9 +167,8 @@ pub const Compiler = struct {
                 self.wt("movq xmm0, rax");
                 self.wt("movq xmm1, rbx");
                 self.wt("subsd xmm0, xmm1");
-                self.wt("movq rax, xmm0");
-                self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("sub qword [stack_ptr], WORD_SIZE");
+                self.wt("movq [r15 - WORD_SIZE], xmm0");
+                self.wt("mov [stack_ptr], r15");
             },
             // TODO: Accept optional type into the `dmp` and `dmpln` instructions to generate proper assembly
             .dmpln => switch (inst.value.Type) {
@@ -197,6 +191,13 @@ pub const Compiler = struct {
                 self.wt("sub r15, WORD_SIZE");
                 self.wt("mov rax, [r15]");
                 self.wt("dec rax");
+                self.wt("mov [r15], rax");
+            },
+            .inc => {
+                self.wt("mov r15, [stack_ptr]");
+                self.wt("sub r15, WORD_SIZE");
+                self.wt("mov rax, [r15]");
+                self.wt("inc rax");
                 self.wt("mov [r15], rax");
             },
             .cmp => switch (inst.value.Type) {
@@ -254,28 +255,23 @@ pub const Compiler = struct {
                 self.wt("syscall");
             },
             .label => self.wprint("{s}:", .{inst.value.Str}),
-            .jl => if (is_fcmp.*) {
-                self.wprintt("jb {s}", .{inst.value.Str});
-            } else {
-                self.wprintt("jl {s}", .{inst.value.Str});
-            },
+
+            .jl => if (is_fcmp.*) self.wprintt("jb {s}", .{inst.value.Str})
+                   else           self.wprintt("jl {s}", .{inst.value.Str}),
+
+            .jg => if (is_fcmp.*) self.wprintt("ja {s}", .{inst.value.Str})
+                   else           self.wprintt("jg {s}", .{inst.value.Str}),
+
             .jle => if (is_fcmp.*) {
                 self.wprintt("jb {s}", .{inst.value.Str});
                 self.wprintt("je {s}", .{inst.value.Str});
-            } else {
-                self.wprintt("jle {s}", .{inst.value.Str});
-            },
-            .jg => if (is_fcmp.*) {
-                self.wprintt("ja {s}", .{inst.value.Str});
-            } else {
-                self.wprintt("jg {s}", .{inst.value.Str});
-            },
+            } else self.wprintt("jle {s}", .{inst.value.Str}),
+
             .jge => if (is_fcmp.*) {
                 self.wprintt("ja {s}", .{inst.value.Str});
                 self.wprintt("je {s}", .{inst.value.Str});
-            } else {
-                self.wprintt("jge {s}", .{inst.value.Str});
-            },
+            } else self.wprintt("jge {s}", .{inst.value.Str}),
+
             .jmp, .jnz, .je, .jne => self.wprintt("{s} {s}", .{inst.type.to_str(), inst.value.Str}),
             inline else => panic("{s} is unimplemented yet..", .{inst.type.to_str()})
         }
