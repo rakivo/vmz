@@ -191,5 +191,6 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
         try vm_.compile_program_to_x86_64(file_path_);
     }
 
+    exit(0);
     return vm_;
 }
