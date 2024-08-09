@@ -30,7 +30,7 @@ if exists("b:current_syntax")
 endif
 
 " Define instructions
-syn keyword masmInstruction push pop fadd fdiv fsub fmul iadd idiv isub imul inc dec jmp je jne jg jl jle jge swap dup cmp dmp nop label native alloc call ret spush spop read halt fread eread pushmp pushsp dmpln write fwrite jmp_if not sizeof
+syn keyword masmInstruction push pop fadd fdiv fsub fmul iadd idiv isub imul inc dec jmp je jne jg jl jle jge swap dup cmp dmp nop label native alloc call ret spush spop read halt fread eread pushmp pushsp dmpln write fwrite jmp_if not sizeof jz jnz
 
 " Define macros starting with #
 syn match masmMacro "#[a-zA-Z_][a-zA-Z0-9_]*"

@@ -32,7 +32,7 @@ pub const Program  = std.ArrayList(Inst);
 pub const LabelMap = std.StringHashMap(u32);
 pub const InstMap  = std.AutoHashMap(u32, Loc);
 
-const DEBUG = false;
+pub const DEBUG = false;
 
 pub inline fn panic(comptime fmt: []const u8, args: anytype) !void {
     std.log.err(fmt, args);
@@ -221,45 +221,6 @@ pub const Vm = struct {
 
     fn print_value(self: *Self, v: *const NaNBox, newline: bool) void {
         switch (v.getType()) {
-            .Bool => {
-                const b: u8 = if (v.as(bool)) 1 else 0;
-                const buf = if (newline) &[_]u8 {b, 10} else &[_]u8 {b};
-                _ = self.private.wstdout.write(buf) catch |err| {
-                    panic("Failed to write to stdout: {}", .{err});
-                };
-            },
-            .I8, .U8 => {
-                const buf = if (newline) &[_]u8 {v.as(u8), 10} else &[_]u8 {v.as(u8)};
-                _ = self.private.wstdout.write(buf) catch |err| {
-                    panic("Failed to write to stdout: {}", .{err});
-                };
-            },
-            .BufPtr => {
-                var buf: [64 + 1]u8 = undefined;
-                const ret_ = if (newline) std.fmt.bufPrint(&buf,  "{}\n", .{v})
-                else std.fmt.bufPrint(&buf,  "{}", .{v});
-
-                const ret = ret_ catch |err| {
-                    panic("Failed to buf print value: {}: {}", .{v, err});
-                };
-
-                _ = self.private.wstdout.write(ret) catch |err| {
-                    panic("Failed to write to stdout: {}", .{err});
-                };
-            },
-            .I32, .U32, .F32, .I64, .U64, .F64 => {
-                var buf: [32]u8 = undefined;
-                const ret_ = if (newline) std.fmt.bufPrint(&buf,  "{}\n", .{v})
-                else std.fmt.bufPrint(&buf,  "{}", .{v});
-
-                const ret = ret_ catch |err| {
-                    panic("Failed to buf print value: {}: {}", .{v, err});
-                };
-
-                _ = self.private.wstdout.write(ret) catch |err| {
-                    panic("Failed to write to stdout: {}", .{err});
-                };
-            },
             .Str => if (self.stack.sz > v.as(u64)) {
                 const len = v.as(u64);
                 const stack_len = self.stack.sz;
@@ -281,8 +242,14 @@ pub const Vm = struct {
                 } else _ = self.private.wstdout.write(str[0..i - 1]) catch |err| {
                     panic("Failed to write to stdout: {}", .{err});
                 };
+            },
+            else => {
+                if (newline) _ = self.private.wstdout.print("{}\n", .{v}) catch |err| {
+                    panic("Failed to write to stdout: {}", .{err});
+                } else _ = self.private.wstdout.print("{}", .{v}) catch |err| {
+                    panic("Failed to write to stdout: {}", .{err});
+                };
             }
-            else self.report_err(error.INVALID_TYPE) catch exit(1)
         }
     }
 
@@ -356,8 +323,16 @@ pub const Vm = struct {
             .inc => return if (self.stack.sz > 0) {
                 const nan = self.stack.back().?;
                 nan.* = switch (nan.getType()) {
-                    .U8  => NaNBox.from(u8,  nan.as(u8)  +% 1),
-                    .U64 => NaNBox.from(u64, nan.as(u64) +% 1),
+                    .U8 => blk: {
+                        const unan = nan.as(u8);
+                        if (unan >= 1) break :blk NaNBox.from(u8, unan +% 1)
+                        else           break :blk NaNBox.from(i8, @as(i8, @intCast(unan)) +% 1);
+                    },
+                    .U64 => blk: {
+                        const unan = nan.as(u64);
+                        if (unan >= 1) break :blk NaNBox.from(u64, unan +% 1)
+                        else           break :blk NaNBox.from(i64, @as(i64, @intCast(unan)) +% 1);
+                    },
                     .I64 => NaNBox.from(i64, nan.as(i64) +% 1),
                     .F64 => NaNBox.from(f64, nan.as(f64) + 1.0),
                     else => return error.INVALID_TYPE
@@ -367,8 +342,16 @@ pub const Vm = struct {
             .dec => return if (self.stack.sz > 0) {
                 const nan = self.stack.back().?;
                 nan.* = switch (nan.getType()) {
-                    .U8  => NaNBox.from(u8,  nan.as(u8)  -% 1),
-                    .U64 => NaNBox.from(u64, nan.as(u64) -% 1),
+                    .U8 => blk: {
+                        const unan = nan.as(u8);
+                        if (unan >= 1) break :blk NaNBox.from(u8, unan -% 1)
+                        else           break :blk NaNBox.from(i8, @as(i8, @intCast(unan)) -% 1);
+                    },
+                    .U64 => blk: {
+                        const unan = nan.as(u64);
+                        if (unan >= 1) break :blk NaNBox.from(u64, unan -% 1)
+                        else           break :blk NaNBox.from(i64, @as(i64, @intCast(unan)) -% 1);
+                    },
                     .I64 => NaNBox.from(i64, nan.as(i64) -% 1),
                     .F64 => NaNBox.from(f64, nan.as(f64) - 1.0),
                     else => return error.INVALID_TYPE
@@ -383,11 +366,12 @@ pub const Vm = struct {
             .fsub => self.perform_mathop('-'),
             .fdiv => self.perform_mathop('/'),
             .fmul => self.perform_mathop('*'),
-            .je, .jne, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
+            .je, .jne, .jnz, .jz, .jg, .jl, .jle, .jge => self.jmp_if_flag(inst),
             .jmp => self.ip = self.ip_check(try self.get_ip(inst)),
             .jmp_if => return if (self.stack.pop()) |b| {
                 const boolean = switch (b.getType()) {
                     .BufPtr                                => true,
+                    .InstValueType                         => false,
                     .Bool                                  => b.as(bool),
                     .I8, .U8, .I32, .U32, .I64, .U64, .Str => b.as(i64) > 0,
                     .F32, .F64                             => b.as(f64) > 0.0,
@@ -444,6 +428,7 @@ pub const Vm = struct {
                     .Str => nan.as(u64),
                     .Bool => @sizeOf(bool),
                     .BufPtr => nan.as(u64),
+                    .InstValueType => @sizeOf(inst_mod.InstValueType),
                 });
 
                 if (nan_type == .BufPtr) self.stack.drop();
@@ -857,7 +842,7 @@ pub const Vm = struct {
 
     pub fn compile_program_to_x86_64(self: *Self, file_path: []const u8) !void {
         var compiler = try Compiler.new(self.alloc, self.program, file_path);
-        try compiler.compile();
+        try compiler.compile2nasm();
     }
 };
 

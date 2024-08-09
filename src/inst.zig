@@ -46,7 +46,7 @@ pub const InstType = enum {
     // ```
     jmp_if,
 
-    jmp, je, jne, jg, jl, jle, jge,
+    jmp, je, jz, jnz, jne, jg, jl, jle, jge,
 
     swap, dup,
 
@@ -121,19 +121,20 @@ pub const InstType = enum {
 
     pub fn arg_required(self: Self) bool {
         return switch (self) {
-            .jmp_if, .swap, .spush, .call, .alloc, .native, .push, .jmp, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,
+            .cmp, .jmp_if, .swap, .spush, .call, .alloc, .native, .push, .jmp, .jz, .jnz, .je, .jne, .jg, .jl, .jle, .jge, .dup => true,
             else => false,
         };
     }
 
     pub fn expected_types(self: Self) []const Token.Type {
         return switch (self) {
-            .jmp_if, .jmp, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
+            .jmp_if, .jmp, .jz, .jnz, .je, .jne, .jg, .jl, .jle, .jge => &[_]Token.Type{.str, .int, .literal},
             .call, .native => &[_]Token.Type{.str, .literal},
             .fread => &[_]Token.Type{.int, .str},
             .spush => &[_]Token.Type{.int, .str, .char},
             .push => &[_]Token.Type{.int, .str, .char, .float, .buf_expr},
             .alloc, .swap, .dup => &[_]Token.Type{.int},
+            .cmp, .dmp, .dmpln => &[_]Token.Type{.literal},
             else  => &[_]Token.Type{},
         };
     }
@@ -142,7 +143,16 @@ pub const InstType = enum {
 pub const None = InstValue.new(void, {});
 
 pub const InstValueType = enum {
-    U8, I64, U64, F64, None, NaN, Str,
+    U8, I64, U64, F64, None, NaN, Str, Type,
+
+    const Self = @This();
+
+    pub fn try_from_str(str: []const u8) ?Self {
+        return inline for (std.meta.fields(Self)) |f| {
+            if (std.mem.eql(u8, f.name, str))
+                return @enumFromInt(f.value);
+        } else null;
+    }
 };
 
 pub const InstValue = union(enum) {
@@ -154,6 +164,7 @@ pub const InstValue = union(enum) {
     NaN: NaNBox,
     Str: []const u8,
     CtBuf: ComptimeBuf,
+    Type: InstValueType,
 
     const Self = @This();
 
@@ -199,9 +210,7 @@ pub const InstValue = union(enum) {
                 const str = bytes[idx..idx + len];
                 return Inst.new(ty, InstValue.new([]const u8, str));
             },
-            else => {
-                return Inst.new(ty, None);
-            }
+            inline else => return Inst.new(ty, None)
         };
     }
 
@@ -214,6 +223,7 @@ pub const InstValue = union(enum) {
             void        => .{ .None = {} },
             NaNBox      => .{ .NaN = v },
             ComptimeBuf => .{ .CtBuf = v },
+            InstValueType => .{ .Type = v },
             []const u8  => if (v.len > 1) {
                 if (v.len - 1 >= STR_CAP) {
                     const cap: usize = if (v.len - 1 >= STACK_CAP) STACK_CAP else STR_CAP;

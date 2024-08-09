@@ -1,7 +1,8 @@
 _start:
-    push 420
+    push 444.310
     push 69
-    push 555
-    swap 2
-    dmpln
+    push 420
+    iadd
+    dmpln I64
+    pop
     halt

@@ -1,4 +1,5 @@
 *.o
+*.js
 *.py
 *.bin
 *.obj

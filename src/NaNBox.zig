@@ -1,5 +1,6 @@
 const std = @import("std");
 const Buf = @import("vm.zig").Buf;
+const InstValueType = @import("inst.zig").InstValueType;
 
 pub const Type = enum(u8) {
     I8,
@@ -13,6 +14,7 @@ pub const Type = enum(u8) {
     Str,
     Bool,
     BufPtr,
+    InstValueType,
 };
 
 pub const NaNBox = union {
@@ -82,6 +84,7 @@ pub const NaNBox = union {
             i8  => @intCast(self.getValue()),
             u8  => @intCast(self.getValue()),
             usize => @intCast(self.getValue()),
+            InstValueType => @enumFromInt(self.getValue()),
             inline else => @compileError("Unsupported type: " ++ @typeName(T) ++ "\n" ++ SUPPORTED_TYPES_MSG),
         };
     }
@@ -92,6 +95,7 @@ pub const NaNBox = union {
             u64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U64) },
             i64 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), v), .I64) },
             u8  => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .U8) },
+            i8  => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v)), .I8) },
             bool => .{ .v = Self.setType(Self.setValue(Self.mkInf(), if (v) 1 else 0), .Bool) },
             []u8, []const u8 => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @intCast(v.len)), .Str) },
             Buf => .{ .v = Self.setType(Self.setValue(Self.mkInf(), @as(i64, @intCast(@intFromPtr(v.ptr)))), .BufPtr) },
@@ -112,6 +116,7 @@ pub const NaNBox = union {
             .Bool => writer.print("{}", .{ self.as(bool) }),
             .Str => writer.print("Str size: {d}", .{ self.as(usize) }),
             .BufPtr => writer.print("Buf Slice Len: {}", .{ self.as(u64) }),
+            .InstValueType => writer.print("{}", .{ self.as(InstValueType) }),
         };
     }
 };

@@ -1,7 +1,9 @@
-const Inst = @import("inst.zig").Inst;
+const print = @import("std").debug.print;
+const DEBUG = @import("vm.zig").DEBUG;
+const Inst  = @import("inst.zig").Inst;
 
 pub const Flag = enum {
-    E, G, L, NE, GE, LE,
+    E, G, L, Z, NZ, NE, GE, LE,
 
     const Self = @This();
 
@@ -10,6 +12,8 @@ pub const Flag = enum {
             .je  => .E,
             .jg  => .G,
             .jl  => .L,
+            .jz  => .Z,
+            .jnz => .NZ,
             .jne => .NE,
             .jge => .GE,
             .jle => .LE,
@@ -32,18 +36,32 @@ pub const Flags = packed struct {
     pub fn cmp(self: *Self, comptime T: type, a: T, b: T) void {
         self._buf = 0;
         if (a == b) {
-            self.set(Flag.E);
-            self.set(Flag.GE);
-            self.set(Flag.LE);
+            self.set(.Z);
+            self.set(.E);
+            self.set(.GE);
+            self.set(.LE);
         } else {
-            self.set(Flag.NE);
+            self.set(.NZ);
+            self.set(.NE);
             if (a > b) {
-                self.set(Flag.G);
-                self.set(Flag.GE);
+                self.set(.G);
+                self.set(.GE);
             } else if (a < b) {
-                self.set(Flag.L);
-                self.set(Flag.LE);
+                self.set(.L);
+                self.set(.LE);
             }
+        }
+
+        if (DEBUG) {
+            print("FLAGS:\n", .{});
+            print("    is E:  {}\n", .{self.is(.E)});
+            print("    is G:  {}\n", .{self.is(.G)});
+            print("    is L:  {}\n", .{self.is(.L)});
+            print("    is Z:  {}\n", .{self.is(.Z)});
+            print("    is NZ: {}\n", .{self.is(.NZ)});
+            print("    is NE: {}\n", .{self.is(.NE)});
+            print("    is GE: {}\n", .{self.is(.GE)});
+            print("    is LE: {}\n", .{self.is(.LE)});
         }
     }
 

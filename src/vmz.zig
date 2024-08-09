@@ -61,7 +61,6 @@ fn write_program(file_path: []const u8, program: []const Inst) !void {
     }
 
     _ = try file.write(&SECTION_SEPARATOR);
-
     for (program) |inst_| {
         var ret: [CHUNK_SIZE]u8 = undefined;
         ret[0] = @intFromEnum(inst_.type);
@@ -185,6 +184,7 @@ pub fn init(allocator: std.mem.Allocator, natives: *Natives) !Vm {
     }
 
     var vm_ = try Vm.init(parsed, natives, allocator);
+    try vm_.execute_program();
     try vm_.compile_program_to_x86_64("prog.asm");
     exit(0);
 }

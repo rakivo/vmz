@@ -11,6 +11,7 @@ const Program       = vm_mod.Program;
 const Inst          = inst_mod.Inst;
 const InstType      = inst_mod.InstType;
 const InstValue     = inst_mod.InstValue;
+const InstValueType = inst_mod.InstValueType;
 
 const Token         = lexer_mod.Token;
 const Lexer         = lexer_mod.Lexer;
@@ -127,6 +128,22 @@ pub const Parser = struct {
                     return report_err(line[idx].loc, error.UNDEFINED_SYMBOL);
 
                 const ty = tyo.?;
+
+                if (ty == .dmp or ty == .dmpln or ty == .cmp) {
+                    if (idx + 1 >= line.len) return report_err(line[idx].loc, error.NO_OPERAND);
+
+                    try im.put(ip, line[idx].loc);
+                    try lm.put(line[idx].str, ip);
+                    idx += 1;
+
+                    const dtype = InstValueType.try_from_str(line[idx].str) orelse {
+                        report_err(line[idx].loc, error.UNDEFINED_TYPE);
+                    };
+                    try program.append(Inst.new(ty, InstValue.new(InstValueType, dtype)));
+                    ip += 1;
+                    continue;
+                }
+
                 if (!ty.arg_required()) {
                     try program.append(Inst.new(ty, inst_mod.None));
                     try im.put(ip, line[idx].loc);
@@ -134,7 +151,7 @@ pub const Parser = struct {
                     continue;
                 }
 
-                if (idx + 1 > line.len) return report_err(line[idx].loc, error.NO_OPERAND);
+                if (idx + 1 >= line.len) return report_err(line[idx].loc, error.NO_OPERAND);
                 idx += 1;
 
                 if (idx >= line.len)

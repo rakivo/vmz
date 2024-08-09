@@ -8,7 +8,7 @@
 
 #"std.asm"
 
-#N 750000
+#N 750000000
 
 _start:
     push 4.0 ; acc
