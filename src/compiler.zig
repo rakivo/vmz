@@ -49,6 +49,14 @@ pub const Compiler = struct {
         self.wprint("    " ++ fmt, args);
     }
 
+    inline fn stack_last_three(self: *const Self) void {
+        self.wt("mov r15, qword [stack_ptr]");
+        self.wt("sub r15, WORD_SIZE");
+        self.wt("mov rax, qword [r15]");
+        self.wt("mov rbx, qword [r15 - WORD_SIZE]");
+        self.wt("mov rdx, qword [r15 - WORD_SIZE * 2]");
+    }
+
     inline fn stack_last_two(self: *const Self) void {
         self.wt("mov r15, qword [stack_ptr]");
         self.wt("sub r15, WORD_SIZE");
@@ -229,12 +237,26 @@ pub const Compiler = struct {
                 self.wprintt("ja {s}", .{inst.value.Str});
                 self.wprintt("je {s}", .{inst.value.Str});
             } else self.wprintt("jge {s}", .{inst.value.Str}),
-            .jmp, .jnz, .je, .jne => self.wprintt("{s} {s}", .{inst.type.to_str(), inst.value.Str}),
+            .pushmp => {
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov r15, [memory_ptr]");
+                self.wt("add qword [stack_ptr], WORD_SIZE");
+            },
+            // NOTE: It works only with integer fds
+            .fread => {
+                self.stack_last_three();
+                self.wt("mov rdi, rdx");
+                self.wt("mov rsi, rbx");
+                self.wt("mov rdx, rax");
+                self.wt("call read_region_into_memory_int_fd");
+            },
             .halt => {
                 self.wt("mov rax, SYS_EXIT");
                 self.wt("xor rdi, rdi");
                 self.wt("syscall");
             },
+            .ret => self.wprintt("{s}", .{inst.type.to_str()}),
+            .call, .jmp, .jnz, .je, .jne => self.wprintt("{s} {s}", .{inst.type.to_str(), inst.value.Str}),
             .label => self.wprint("{s}:", .{inst.value.Str}),
             inline else => panic("{s} is unimplemented yet..", .{inst.type.to_str()})
         }
@@ -242,12 +264,13 @@ pub const Compiler = struct {
 
     pub fn compile2nasm(self: *const Self) !void {
         self.w("BITS 64");
+        self.w("%define MEMORY_CAP 8 * 1024");
         self.w("%define STACK_CAP  1024");
         self.w("%define WORD_SIZE  8");
         self.w("%define SYS_WRITE  1");
         self.w("%define SYS_STDOUT 1");
         self.w("%define SYS_EXIT   60");
-        self.w("segment .text");
+        self.w("section .text");
         self.w("dmp_i64:");
         self.w("    push    rbp");
         self.w("    mov     rbp, rsp");
@@ -481,6 +504,29 @@ pub const Compiler = struct {
         self.w("    add     rsp, 128");
         self.w("    pop     rbp");
         self.w("    ret");
+        self.w("; al:  8bit value");
+        self.w("; rdi: start");
+        self.w("; rsi: end");
+        self.w("write_region:");
+        self.w("    mov r15, [memory_ptr]");
+        self.w("    add rsi, r15");
+        self.w(".loop:");
+        self.w("    mov [r15 + rdi], al");
+        self.w("    inc r15");
+        self.w("    cmp r15, rsi");
+        self.w("    jl .loop");
+        self.w("    mov qword [memory_ptr], r15");
+        self.w("    ret");
+        self.w("; rdi: int fd");
+        self.w("; rsi: start");
+        self.w("; rdx: end");
+        self.w("read_region_into_memory_int_fd:");
+        self.w("    add rsi, memory_buf");
+        self.w("    add rdx, memory_buf");
+        self.w("    xor rax, rax");
+        self.w("    syscall");
+        self.w("    add qword [memory_ptr], rax");
+        self.w("    ret");
         self.w("global _start");
 
         var is_fcmp = false;
@@ -489,7 +535,7 @@ pub const Compiler = struct {
             self.compile_inst2nasm(&inst, &float_counter, &is_fcmp);
         }
 
-        self.w("segment .data");
+        self.w("section .data");
         float_counter = 0;
         for (self.program) |inst| {
             switch (inst.value) {
@@ -505,7 +551,9 @@ pub const Compiler = struct {
             }
         }
         self.w("stack_ptr dq stack_buf");
-        self.w("segment .bss");
+        self.w("memory_ptr dq memory_buf");
+        self.w("section .bss");
+        self.w("memory_buf resb MEMORY_CAP");
         self.w("stack_buf resq STACK_CAP");
     }
 };

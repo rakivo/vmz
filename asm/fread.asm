@@ -1,7 +1,6 @@
 _start:
-    push 1
+    push 0
+    push 0
+    push 8192
     fread
-    push "Stdin: "
-    dmp
-    spop
-    dmpln
+    halt
