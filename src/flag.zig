@@ -79,9 +79,7 @@ pub const Parser = struct {
     fn parse_(self: *const Self, flag: anytype) ?[]const u8 {
         for (self.args, 0..) |arg, i|
             if (std.mem.eql(u8, arg, flag.short) or std.mem.eql(u8, arg, flag.long))
-                if (i + 1 < self.args.len) {
-                    return self.args[i + 1];
-                } else return null;
+                return if (i + 1 < self.args.len) self.args[i + 1] else null;
 
         return null;
     }

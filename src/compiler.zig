@@ -3,12 +3,13 @@ const vm_mod   = @import("vm.zig");
 const inst_mod = @import("inst.zig");
 const NaNBox   = @import("NaNBox.zig").NaNBox;
 
-const Inst = inst_mod.Inst;
+const InstValue = inst_mod.InstValue;
+const Inst      = inst_mod.Inst;
 
-const panic = vm_mod.panic;
+const panic     = vm_mod.panic;
 
-const exit = std.process.exit;
-const print = std.debug.print;
+const exit      = std.process.exit;
+const print     = std.debug.print;
 
 pub const Compiler = struct {
     alloc: std.mem.Allocator,
@@ -51,39 +52,40 @@ pub const Compiler = struct {
 
     inline fn stack_last_three(self: *const Self) void {
         self.wt("mov r15, qword [stack_ptr]");
-        self.wt("sub r15, WORD_SIZE");
-        self.wt("mov rax, qword [r15]");
-        self.wt("mov rbx, qword [r15 - WORD_SIZE]");
-        self.wt("mov rdx, qword [r15 - WORD_SIZE * 2]");
+        self.wt("mov rax, qword [r15 - WORD_SIZE]");
+        self.wt("mov rbx, qword [r15 - WORD_SIZE * 2]");
+        self.wt("mov rdx, qword [r15 - WORD_SIZE * 3]");
     }
 
     inline fn stack_last_two(self: *const Self) void {
         self.wt("mov r15, qword [stack_ptr]");
-        self.wt("sub r15, WORD_SIZE");
-        self.wt("mov rax, qword [r15]");
-        self.wt("mov rbx, qword [r15 - WORD_SIZE]");
+        self.wt("mov rax, qword [r15 - WORD_SIZE]");
+        self.wt("mov rbx, qword [r15 - WORD_SIZE * 2]");
     }
 
     inline fn stack_last(self: *const Self) void {
         self.wt("mov r15, qword [stack_ptr]");
-        self.wt("sub r15, WORD_SIZE");
-        self.wt("mov rax, qword [r15]");
+        self.wt("mov rax, qword [r15 - WORD_SIZE]");
+    }
+
+    inline fn stack_last_xmm(self: *const Self) void {
+        self.wt("mov r15, qword [stack_ptr]");
+        self.wt("mov rax, qword [r15 - WORD_SIZE]");
+        self.wt("movq xmm0, rax");
     }
 
     inline fn stack_last_two_xmm(self: *const Self) void {
         self.wt("mov r15, qword [stack_ptr]");
-        self.wt("sub r15, WORD_SIZE");
-        self.wt("mov rbx, qword [r15]");
-        self.wt("mov rax, qword [r15 - WORD_SIZE]");
+        self.wt("mov rbx, qword [r15 - WORD_SIZE]");
+        self.wt("mov rax, qword [r15 - WORD_SIZE * 2]");
         self.wt("movq xmm0, rax");
         self.wt("movq xmm1, rbx");
     }
 
     inline fn binop_f64(self: *const Self, op: []const u8) void {
-        // r15 here is already offset by `stack_last_two_xmm`.
         self.wprintt("{s} xmm0, xmm1", .{op});
-        self.wt("movq [r15 - WORD_SIZE], xmm0");
-        self.wt("mov qword [stack_ptr], r15");
+        self.wt("movq [r15 - WORD_SIZE * 2], xmm0");
+        self.wt("sub qword [stack_ptr], WORD_SIZE");
     }
 
     inline fn stack_push_i64(self: *const Self, comptime T: type, v: T) void {
@@ -93,10 +95,28 @@ pub const Compiler = struct {
     }
 
     inline fn stack_push_f64(self: *const Self, fltc: u64) void {
-        self.wprintt("mov rax, [__f{d}__]", .{fltc});
         self.wt("mov r15, qword [stack_ptr]");
-        self.wt("mov qword [r15], rax");
+        self.wprintt("mov rax, [__f{d}__]", .{fltc});
+        self.wt("mov [r15], rax");
         self.wt("add qword [stack_ptr], WORD_SIZE");
+    }
+
+    inline fn stack_mov_to_2nd_from_end_i64(self: *const Self, what: []const u8) void {
+        self.wprintt("mov [r15 - WORD_SIZE * 2], {s}", .{what});
+        self.wt("sub qword [stack_ptr], WORD_SIZE");
+    }
+
+    inline fn get_u64_idc(instv: InstValue) u64 {
+        return switch (instv) {
+            .U8  => |int| @intCast(int),
+            .U64 => |int| int,
+            .I64 => |int| @intCast(int),
+            .NaN => |nan| switch (nan.getType()) {
+                .I8, .I32, .I64, .U8, .U32, .U64 => nan.as(u64),
+                inline else => panic("INVALID TYPE BRUH", .{})
+            },
+            inline else => panic("INVALID TYPE BRUH", .{})
+        };
     }
 
     pub fn compile_inst2nasm(self: *const Self, inst: *const Inst, float_counter: *u64, is_fcmp: *bool) void {
@@ -123,27 +143,24 @@ pub const Compiler = struct {
             .iadd => {
                 self.stack_last_two();
                 self.wt("add rax, rbx");
-                self.wt("mov [stack_ptr], r15");
+                self.stack_mov_to_2nd_from_end_i64("rax");
             },
             .imul => {
                 self.stack_last_two();
                 self.wt("xor edx, edx");
                 self.wt("mul rbx");
-                self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("mov [stack_ptr], r15");
+                self.stack_mov_to_2nd_from_end_i64("rax");
             },
             .idiv => {
                 self.stack_last_two();
                 self.wt("xor edx, edx");
                 self.wt("idiv rax");
-                self.wt("mov [r15 - WORD_SIZE], rax");
-                self.wt("mov [stack_ptr], r15");
+                self.stack_mov_to_2nd_from_end_i64("rax");
             },
             .isub => {
                 self.stack_last_two();
                 self.wt("sub rbx, rax");
-                self.wt("mov qword [r15 - WORD_SIZE], rbx");
-                self.wt("mov qword [stack_ptr], r15");
+                self.stack_mov_to_2nd_from_end_i64("rbx");
             },
             .fmul => {
                 self.stack_last_two_xmm();
@@ -163,14 +180,13 @@ pub const Compiler = struct {
             },
             .dmpln => switch (inst.value.Type) {
                 .F64 => {
-                    self.wt("mov r15, [stack_ptr]");
-                    self.wt("mov rax, [r15 - WORD_SIZE]");
-                    self.wt("movq xmm0, rax");
+                    self.stack_last_xmm();
                     self.wt("call dmp_f64");
                 },
                 .U8, .U64, .I64 => {
                     self.wt("mov r15, qword [stack_ptr]");
                     self.wt("mov rdi, qword [r15 - WORD_SIZE]");
+                    self.stack_last();
                     self.wt("call dmp_i64");
                 },
                 .None => {},
@@ -179,12 +195,12 @@ pub const Compiler = struct {
             .dec => {
                 self.stack_last();
                 self.wt("dec rax");
-                self.wt("mov [r15], rax");
+                self.wt("mov [r15 - WORD_SIZE], rax");
             },
             .inc => {
                 self.stack_last();
                 self.wt("inc rax");
-                self.wt("mov [r15], rax");
+                self.wt("mov [r15 - WORD_SIZE], rax");
             },
             .cmp => switch (inst.value.Type) {
                 .F64 => {
@@ -202,24 +218,14 @@ pub const Compiler = struct {
                 inline else => panic("Comparing type: {} it not implemented yet..", .{inst.value.Type})
             },
             .swap => {
-                const idx: u64 = switch (inst.value) {
-                    .U8  => |int| @intCast(int),
-                    .U64 => |int| int,
-                    .I64 => |int| @intCast(int),
-                    else => panic("INVALID TYPE BRUH", .{})
-                };
+                const idx = get_u64_idc(inst.value);
                 self.stack_last();
-                self.wprintt("mov rbx, [r15 - WORD_SIZE * {d}]", .{idx});
-                self.wt("mov [r15], rbx");
-                self.wprintt("mov [r15 - WORD_SIZE * {d}], rax", .{idx});
+                self.wprintt("mov rbx, [r15 - WORD_SIZE - WORD_SIZE * {d}]", .{idx});
+                self.wt("mov [r15 - WORD_SIZE], rbx");
+                self.wprintt("mov [r15 - WORD_SIZE - WORD_SIZE * {d}], rax", .{idx});
             },
             .dup => {
-                const idx: u64 = switch (inst.value) {
-                    .U8  => |int| @intCast(int),
-                    .U64 => |int| int,
-                    .I64 => |int| @intCast(int),
-                    else => panic("INVALID TYPE BRUH", .{})
-                };
+                const idx = get_u64_idc(inst.value);
                 self.wt("mov r15, qword [stack_ptr]");
                 self.wprintt("mov rax, qword [r15 - WORD_SIZE - WORD_SIZE * {d}]", .{idx});
                 self.wt("mov qword [r15], rax");
@@ -275,10 +281,10 @@ pub const Compiler = struct {
         self.w("    push    rbp");
         self.w("    mov     rbp, rsp");
         self.w("    sub     rsp, 64");
-        self.w("    mov     qword [rbp - 8], rdi");
+        self.w("    mov     qword [rbp - 8],  rax");
         self.w("    mov     dword [rbp - 36], 0");
         self.w("    mov     dword [rbp - 40], 0");
-        self.w("    cmp     qword [rbp - 8], 0");
+        self.w("    cmp     qword [rbp - 8],  0");
         self.w("    jge     .LBB0_2");
         self.w("    mov     dword [rbp - 40], 1");
         self.w("    xor     eax, eax");
