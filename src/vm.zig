@@ -642,19 +642,16 @@ pub const Vm = struct {
                 self.stack.append(NaNBox.from(u8, self.memory[exact_idx]));
                 self.ip += 1;
             } else error.STACK_UNDERFLOW,
-            .write => return if (self.stack.sz > 1) {
-                const nan = self.stack.buf[self.stack.sz - 1 - 1];
-                const exact_idx = self.stack.back().?.as(u64);
+            .write => return if (self.stack.sz > 2) {
+                const v: u8 = @intCast(self.stack.buf[self.stack.sz - 1 - 1].as(u64));
+                const a     = self.stack.buf[self.stack.sz - 1 - 2].as(u64);
+                const b     = self.stack.buf[self.stack.sz - 1 - 3].as(u64);
 
-                if (exact_idx >= MEMORY_CAP)
+                if (a >= MEMORY_CAP or b >= MEMORY_CAP)
                     return error.ILLEGAL_MEMORY_ACCESS;
 
                 defer self.ip += 1;
-                return switch (nan.getType()) {
-                    .U8 => self.memory[exact_idx] = nan.as(u8),
-                    .I64, .U64 => self.memory[exact_idx] = @intCast(nan.as(u64)),
-                    else => error.INVALID_TYPE,
-                };
+                for (a..b) |i| self.memory[i] = v;
             } else error.STACK_UNDERFLOW,
             .read => return if (self.stack.sz > 1) {
                 const last = self.stack.back().?;

@@ -256,6 +256,15 @@ pub const Compiler = struct {
                 self.wt("mov rdx, rax");
                 self.wt("call read_region_into_memory_int_fd");
             },
+            .write => {
+                self.stack_last_three();
+                self.wt("mov al,  dl");
+                self.wt("mov rdi, rbx");
+                self.wt("mov rsi, rdx");
+                self.wt("mov r15, [memory_ptr]");
+                self.wt("add rsi, r15");
+                self.wt("call write_region");
+            },
             .halt => {
                 self.wt("mov rax, SYS_EXIT");
                 self.wt("xor rdi, rdi");
@@ -514,21 +523,18 @@ pub const Compiler = struct {
         self.w("; rdi: start");
         self.w("; rsi: end");
         self.w("write_region:");
-        self.w("    mov r15, [memory_ptr]");
-        self.w("    add rsi, r15");
-        self.w(".loop:");
         self.w("    mov [r15 + rdi], al");
         self.w("    inc r15");
         self.w("    cmp r15, rsi");
-        self.w("    jl .loop");
+        self.w("    jl write_region");
         self.w("    mov qword [memory_ptr], r15");
         self.w("    ret");
         self.w("; rdi: int fd");
         self.w("; rsi: start");
         self.w("; rdx: end");
         self.w("read_region_into_memory_int_fd:");
+        self.w("    sub rdx, rsi");
         self.w("    add rsi, memory_buf");
-        self.w("    add rdx, memory_buf");
         self.w("    xor rax, rax");
         self.w("    syscall");
         self.w("    add qword [memory_ptr], rax");
