@@ -271,6 +271,14 @@ pub const Compiler = struct {
                 self.wt("mov rax, qword [r15 - WORD_SIZE * 3]");
                 self.wt("call write_region");
             },
+            // NOTE: It works only with integer fds
+            .fwrite => {
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov rdx, qword [r15 - WORD_SIZE]");
+                self.wt("mov rsi, qword [r15 - WORD_SIZE * 2]");
+                self.wt("mov rdi, qword [r15 - WORD_SIZE * 3]");
+                self.wt("call write_region_of_memory_int_fd");
+            },
             .halt => {
                 self.wt("mov rax, SYS_EXIT");
                 self.wt("xor rdi, rdi");
@@ -563,6 +571,15 @@ pub const Compiler = struct {
         self.w("    jl .loop");
         self.w("    mov qword [stack_ptr],  r14 ; offset pointers");
         self.w("    mov qword [memory_ptr], r15 ; offset pointers");
+        self.w("    ret");
+        self.w("; rdi: int fd");
+        self.w("; rsi: start");
+        self.w("; rdx: end");
+        self.w("write_region_of_memory_int_fd:");
+        self.w("    sub rdx, rsi                ; get count of the bytes, basically end - start");
+        self.w("    add rsi, memory_buf         ; offset start index by the memory buffer");
+        self.w("    mov rax, SYS_WRITE          ; write syscall");
+        self.w("    syscall");
         self.w("    ret");
         self.w("global _start");
 
