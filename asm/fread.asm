@@ -5,8 +5,12 @@ _start:
     fread
 
     push 69
+    pushmp
+    push 15
+    write
+
     push 0
     pushmp
-    write
+    read
 
     halt

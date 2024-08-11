@@ -245,24 +245,30 @@ pub const Compiler = struct {
             } else self.wprintt("jge {s}", .{inst.value.Str}),
             .pushmp => {
                 self.wt("mov r15, qword [stack_ptr]");
-                self.wt("mov r15, [memory_ptr]");
+                self.wt("mov rax, [memory_ptr]");
+                self.wt("sub rax, memory_buf");
+                self.wt("mov [r15], rax");
                 self.wt("add qword [stack_ptr], WORD_SIZE");
             },
             // NOTE: It works only with integer fds
             .fread => {
-                self.stack_last_three();
-                self.wt("mov rdi, rdx");
-                self.wt("mov rsi, rbx");
-                self.wt("mov rdx, rax");
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov rdi, qword [r15 - WORD_SIZE * 3]");
+                self.wt("mov rsi, qword [r15 - WORD_SIZE * 2]");
+                self.wt("mov rdx, qword [r15 - WORD_SIZE]");
                 self.wt("call read_region_into_memory_int_fd");
             },
+            .read => {
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov rdi, qword [r15 - WORD_SIZE * 2]");
+                self.wt("mov rsi, qword [r15 - WORD_SIZE]");
+                self.wt("call read_region_into_stack");
+            },
             .write => {
-                self.stack_last_three();
-                self.wt("mov al,  dl");
-                self.wt("mov rdi, rbx");
-                self.wt("mov rsi, rdx");
-                self.wt("mov r15, [memory_ptr]");
-                self.wt("add rsi, r15");
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov rsi, qword [r15 - WORD_SIZE]");
+                self.wt("mov rdi, qword [r15 - WORD_SIZE * 2]");
+                self.wt("mov rax, qword [r15 - WORD_SIZE * 3]");
                 self.wt("call write_region");
             },
             .halt => {
@@ -523,21 +529,40 @@ pub const Compiler = struct {
         self.w("; rdi: start");
         self.w("; rsi: end");
         self.w("write_region:");
-        self.w("    mov [r15 + rdi], al");
-        self.w("    inc r15");
-        self.w("    cmp r15, rsi");
-        self.w("    jl write_region");
-        self.w("    mov qword [memory_ptr], r15");
+        self.w("    mov r15, [memory_ptr]");
+        self.w("    add rsi, r15                ; offset start index by the memory buffer");
+        self.w(".loop:");
+        self.w("    mov [r15 + rdi], al         ; mov 8bit value into the memory");
+        self.w("    inc r15                     ; increment index");
+        self.w("    cmp r15, rsi                ; compare with the end index");
+        self.w("    jl .loop");
+        self.w("    mov qword [memory_ptr], r15 ; update memory_ptr");
         self.w("    ret");
         self.w("; rdi: int fd");
         self.w("; rsi: start");
         self.w("; rdx: end");
         self.w("read_region_into_memory_int_fd:");
-        self.w("    sub rdx, rsi");
-        self.w("    add rsi, memory_buf");
-        self.w("    xor rax, rax");
+        self.w("    add rsi, memory_buf         ; offset start index by the memory buffer");
+        self.w("    xor rax, rax                ; read syscall");
         self.w("    syscall");
-        self.w("    add qword [memory_ptr], rax");
+        self.w("    add qword [memory_ptr], rax ; increment memory_ptr by count of the bytes read");
+        self.w("    ret");
+        self.w("; rdi: start");
+        self.w("; rsi: end");
+        self.w("read_region_into_stack:");
+        self.w("    mov r14, qword [stack_ptr]  ; get pointer to append elements to the stack");
+        self.w("    mov r15, qword memory_buf");
+        self.w("    add rsi, r15                ; offset the end index with memory_buf address");
+        self.w(".loop:");
+        self.w("    mov al, [r15 + rdi]         ; get 8bit value from the address");
+        self.w("    movzx rax, al               ; zero extend it to rax");
+        self.w("    mov qword [r14], rax        ; mov it to the stack");
+        self.w("    inc r15                     ; increment memory index");
+        self.w("    add r14, WORD_SIZE          ; increment stack index");
+        self.w("    cmp r15, rsi                ; compare with the end index");
+        self.w("    jl .loop");
+        self.w("    mov qword [stack_ptr],  r14 ; offset pointers");
+        self.w("    mov qword [memory_ptr], r15 ; offset pointers");
         self.w("    ret");
         self.w("global _start");
 
