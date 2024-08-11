@@ -181,12 +181,30 @@ pub const Compiler = struct {
             .dmpln => switch (inst.value.Type) {
                 .F64 => {
                     self.stack_last_xmm();
+                    self.wt("mov r15, 1"); // mov 1 to r15 to print newline
                     self.wt("call dmp_f64");
                 },
                 .U8, .U64, .I64 => {
                     self.wt("mov r15, qword [stack_ptr]");
                     self.wt("mov rdi, qword [r15 - WORD_SIZE]");
                     self.stack_last();
+                    self.wt("mov r15, 1"); // mov 1 to r15 to print newline
+                    self.wt("call dmp_i64");
+                },
+                .None => {},
+                inline else => panic("Printing type: {} it not implemented yet..", .{inst.value.Type})
+            },
+            .dmp => switch (inst.value.Type) {
+                .F64 => {
+                    self.stack_last_xmm();
+                    self.wt("mov r15, 0"); // mov 0 to r15 to do not print newline
+                    self.wt("call dmp_f64");
+                },
+                .U8, .U64, .I64 => {
+                    self.wt("mov r15, qword [stack_ptr]");
+                    self.wt("mov rdi, qword [r15 - WORD_SIZE]");
+                    self.stack_last();
+                    self.wt("mov r15, 0"); // mov 0 to r15 to do not print newline
                     self.wt("call dmp_i64");
                 },
                 .None => {},
@@ -243,6 +261,9 @@ pub const Compiler = struct {
                 self.wprintt("ja {s}", .{inst.value.Str});
                 self.wprintt("je {s}", .{inst.value.Str});
             } else self.wprintt("jge {s}", .{inst.value.Str}),
+            .jmp_if => {
+                // placeholder for this instruction to compile std
+            },
             .pushmp => {
                 self.wt("mov r15, qword [stack_ptr]");
                 self.wt("mov rax, [memory_ptr]");
@@ -263,6 +284,14 @@ pub const Compiler = struct {
                 self.wt("mov rdi, qword [r15 - WORD_SIZE * 2]");
                 self.wt("mov rsi, qword [r15 - WORD_SIZE]");
                 self.wt("call read_region_into_stack");
+            },
+            .eread => {
+                self.wt("mov r15, qword [stack_ptr]");
+                self.wt("mov r14, memory_buf");
+                self.wt("mov rax, qword [r15 - WORD_SIZE]");
+                self.wt("movzx rax, byte [rax + r14]");
+                self.wt("mov [r15], rax");
+                self.wt("add qword [stack_ptr], WORD_SIZE");
             },
             .write => {
                 self.wt("mov r15, qword [stack_ptr]");
@@ -300,6 +329,7 @@ pub const Compiler = struct {
         self.w("%define SYS_STDOUT 1");
         self.w("%define SYS_EXIT   60");
         self.w("section .text");
+        self.w("; r15b: newline");
         self.w("dmp_i64:");
         self.w("    push    rbp");
         self.w("    mov     rbp, rsp");
@@ -397,12 +427,19 @@ pub const Compiler = struct {
         self.w("    mov     byte [rbp + rax - 32], 10");
         self.w("    lea     rsi, [rbp - 32]");
         self.w("    movsxd  rdx, dword [rbp - 36]");
+        self.w("    test    r15b, r15b");
+        self.w("    jz      .not_newline");
+        self.w("    jmp     .write");
+        self.w(".not_newline:");
+        self.w("    dec rdx");
+        self.w(".write:");
         self.w("    mov     eax, SYS_WRITE");
         self.w("    mov     edi, SYS_STDOUT");
         self.w("    syscall");
         self.w("    add     rsp, 64");
         self.w("    pop     rbp");
         self.w("    ret");
+        self.w("; r15b: newline");
         self.w("dmp_f64:");
         self.w("    push    rbp");
         self.w("    mov     rbp, rsp");
@@ -527,8 +564,14 @@ pub const Compiler = struct {
         self.w("    mov     byte [rbp + rax - 48], 10");
         self.w("    lea     rsi, [rbp - 48]");
         self.w("    movsxd  rdx, dword [rbp - 52]");
-        self.w("    mov     eax, 1");
-        self.w("    mov     edi, 1");
+        self.w("    test    r15b, r15b");
+        self.w("    jz      .not_newline");
+        self.w("    jmp     .write");
+        self.w(".not_newline:");
+        self.w("    dec rdx");
+        self.w(".write:");
+        self.w("    mov     rax, SYS_WRITE");
+        self.w("    mov     rdi, SYS_STDOUT");
         self.w("    syscall");
         self.w("    add     rsp, 128");
         self.w("    pop     rbp");
@@ -562,8 +605,7 @@ pub const Compiler = struct {
         self.w("    mov r15, qword memory_buf");
         self.w("    add rsi, r15                ; offset the end index with memory_buf address");
         self.w(".loop:");
-        self.w("    mov al, [r15 + rdi]         ; get 8bit value from the address");
-        self.w("    movzx rax, al               ; zero extend it to rax");
+        self.w("    movzx rax, byte [r15 + rdi] ; zero extend 8bit value to rax");
         self.w("    mov qword [r14], rax        ; mov it to the stack");
         self.w("    inc r15                     ; increment memory index");
         self.w("    add r14, WORD_SIZE          ; increment stack index");

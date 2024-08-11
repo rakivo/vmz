@@ -8,7 +8,7 @@
 
 #"std.asm"
 
-#N 750000000
+#N 7500000
 
 _start:
     push 4.0 ; acc
@@ -38,10 +38,12 @@ _start:
     swap 2
     dec      ; decrement counter
 
-    dup 0
-    jmp_if .loop
+    push 0
+    cmp I64
+    jnz .loop
 
     pop      ; clean the stack and only have pi left
     pop
 
-    dmpln
+    dmpln F64
+    halt

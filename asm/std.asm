@@ -1,3 +1,4 @@
+#WORD_SIZE 8
 #MEMORY_CAP 8192
 
 #print what {
@@ -33,23 +34,23 @@
     fwrite
 }
 
-#fwrite_all_buf buf, fd {
-    push buf
-    push fd
-    push 0
-    push buf
-    sizeof
-    fwrite
-}
+; #fwrite_all_buf buf, fd {
+;     push buf
+;     push fd
+;     push 0
+;     push buf
+;     sizeof
+;     fwrite
+; }
 
-#fread_all_buf buf, fd {
-    push buf
-    push fd
-    push 0
-    push buf
-    sizeof
-    fread
-}
+; #fread_all_buf buf, fd {
+;     push buf
+;     push fd
+;     push 0
+;     push buf
+;     sizeof
+;     fread
+; }
 
 #fadd what {
     push what
@@ -103,11 +104,11 @@ print_file:
     swap 1
 .loop:
     eread
-    dmp
+    dmp U8
     pop
     pushmp
     dec
-    cmp
+    cmp I64
     inc
     jl .loop
     ret
