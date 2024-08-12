@@ -262,7 +262,12 @@ pub const Compiler = struct {
                 self.wprintt("je {s}", .{inst.value.Str});
             } else self.wprintt("jge {s}", .{inst.value.Str}),
             .jmp_if => {
-                // placeholder for this instruction to compile std
+                // This is just a quick solution for now, because i haven't implemented the NaN boxes in x86_64 asm yet,
+                // so, we can't switch on types and check for anything.
+                self.stack_last();
+                self.wt("test rax, rax");
+                self.wt("cmp rax, 1");
+                self.wprintt("jge {s}", .{inst.value.Str});
             },
             .pushmp => {
                 self.wt("mov r15, qword [stack_ptr]");
